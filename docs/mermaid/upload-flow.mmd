@@ -1,0 +1,16 @@
+sequenceDiagram
+    participant C as Client
+    participant ALB as ALB
+    participant API as API Service
+    participant S3 as S3
+    participant DDB as DynamoDB
+
+    C->>ALB: POST /jobs (file + userId)
+    ALB->>API: Forward request
+    API->>API: Generate jobId (UUID)
+    API->>S3: PutObject(uploads/jobId/fileName)
+    S3-->>API: 200 OK
+    API->>DDB: PutItem(jobId, status=HELD, userId, s3Key)
+    DDB-->>API: 200 OK
+    API-->>ALB: 201 Created
+    ALB-->>C: {jobId, status: HELD}

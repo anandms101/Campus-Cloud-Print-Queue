@@ -1,0 +1,36 @@
+{
+  "config": {
+    "jobs": 10,
+    "printer": "printer-3",
+    "cluster": "campus-print-cluster"
+  },
+  "statuses_before_kill": {
+    "0896e026-d171-42f5-af19-537bbe248700": "RELEASED",
+    "b596c845-9c1b-4986-8b51-1496f177f2b8": "RELEASED",
+    "4530ff51-5a88-4bbc-b7a2-34dca58749f8": "PROCESSING",
+    "d3cb8c81-8581-45ff-93d7-b7be338fa172": "RELEASED",
+    "73677f96-8ac9-4b8a-90ca-4974e64b76b7": "RELEASED",
+    "07b37592-25d5-4d77-8eae-949df0aa5df5": "RELEASED",
+    "8507e78b-8097-4d23-bea0-42e0a36b8e31": "RELEASED",
+    "697fd3a9-a4dc-4e30-98e8-e2c5056c6653": "RELEASED",
+    "6b335562-83ab-470b-8579-e99f04133e01": "RELEASED",
+    "4dc391ba-6da0-4306-a432-9dc4f3502965": "RELEASED"
+  },
+  "final_statuses": {
+    "0896e026-d171-42f5-af19-537bbe248700": "DONE",
+    "b596c845-9c1b-4986-8b51-1496f177f2b8": "DONE",
+    "4530ff51-5a88-4bbc-b7a2-34dca58749f8": "DONE",
+    "d3cb8c81-8581-45ff-93d7-b7be338fa172": "DONE",
+    "73677f96-8ac9-4b8a-90ca-4974e64b76b7": "DONE",
+    "07b37592-25d5-4d77-8eae-949df0aa5df5": "DONE",
+    "8507e78b-8097-4d23-bea0-42e0a36b8e31": "DONE",
+    "697fd3a9-a4dc-4e30-98e8-e2c5056c6653": "DONE",
+    "6b335562-83ab-470b-8579-e99f04133e01": "DONE",
+    "4dc391ba-6da0-4306-a432-9dc4f3502965": "DONE"
+  },
+  "status_counts": {
+    "DONE": 10
+  },
+  "recovery_time_s": 154.4230091571808,
+  "all_completed": true
+}

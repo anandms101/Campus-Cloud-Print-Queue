@@ -1,0 +1,49 @@
+graph TB
+    Client([Student Client<br/>Browser / CLI / Mobile])
+
+    subgraph AWS["AWS Cloud — us-west-2"]
+        subgraph PUB["Public Subnets · 2 AZs"]
+            ALB["Application Load Balancer<br/>Port 80 · HTTP"]
+        end
+
+        subgraph ECS["ECS Fargate Cluster"]
+            API1["API Task 1<br/>FastAPI · Uvicorn"]
+            API2["API Task 2<br/>FastAPI · Uvicorn"]
+            P1["Printer-1 Worker<br/>SQS Poller"]
+            P2["Printer-2 Worker<br/>SQS Poller"]
+            P3["Printer-3 Worker<br/>SQS Poller"]
+        end
+
+        subgraph DATA["Managed Data Services"]
+            DDB[("DynamoDB<br/>campus-print-jobs<br/>PK: jobId")]
+            S3[("S3 Bucket<br/>Document Storage")]
+            SQS1[["SQS: printer-1"]]
+            SQS2[["SQS: printer-2"]]
+            SQS3[["SQS: printer-3"]]
+            DLQ1[["DLQ: printer-1"]]
+            DLQ2[["DLQ: printer-2"]]
+            DLQ3[["DLQ: printer-3"]]
+        end
+
+        subgraph OBS["Observability"]
+            CWL["CloudWatch Logs<br/>Structured JSON"]
+            CWD["CloudWatch Dashboard"]
+        end
+    end
+
+    Client -->|HTTP| ALB
+    ALB --> API1
+    ALB --> API2
+    API1 & API2 -->|Read/Write| DDB
+    API1 & API2 -->|Upload| S3
+    API1 & API2 -->|Enqueue| SQS1 & SQS2 & SQS3
+    SQS1 -->|Long Poll| P1
+    SQS2 -->|Long Poll| P2
+    SQS3 -->|Long Poll| P3
+    P1 & P2 & P3 -->|Fetch Doc| S3
+    P1 & P2 & P3 -->|Update State| DDB
+    SQS1 -.->|After 3 fails| DLQ1
+    SQS2 -.->|After 3 fails| DLQ2
+    SQS3 -.->|After 3 fails| DLQ3
+    ECS -.->|Logs| CWL
+    CWL -.-> CWD

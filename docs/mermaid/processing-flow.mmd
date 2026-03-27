@@ -1,0 +1,23 @@
+sequenceDiagram
+    participant SQS as SQS Queue
+    participant W as Printer Worker
+    participant DDB as DynamoDB
+    participant S3 as S3
+
+    loop Every 20s (long poll)
+        W->>SQS: ReceiveMessage(WaitTimeSeconds=20)
+        SQS-->>W: Message {jobId, s3Key}
+    end
+    W->>DDB: UpdateItem(SET status=PROCESSING WHERE status=RELEASED)
+    alt Condition succeeds
+        DDB-->>W: OK
+        W->>S3: GetObject(s3Key)
+        S3-->>W: Document bytes
+        W->>W: Simulate printing (5-15s)
+        W->>DDB: UpdateItem(SET status=DONE WHERE status=PROCESSING)
+        DDB-->>W: OK
+        W->>SQS: DeleteMessage
+    else Already processed (idempotent skip)
+        DDB-->>W: ConditionalCheckFailedException
+        W->>SQS: DeleteMessage
+    end

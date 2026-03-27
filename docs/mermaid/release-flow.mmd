@@ -1,0 +1,17 @@
+sequenceDiagram
+    participant C as Client
+    participant API as API Service
+    participant DDB as DynamoDB
+    participant SQS as SQS (printer queue)
+
+    C->>API: POST /jobs/id/release {printerName}
+    API->>DDB: UpdateItem(SET status=RELEASED WHERE status=HELD)
+    alt Condition succeeds
+        DDB-->>API: 200 OK
+        API->>SQS: SendMessage({jobId, s3Key})
+        SQS-->>API: 200 OK
+        API-->>C: 200 {status: RELEASED}
+    else Already released / not HELD
+        DDB-->>API: ConditionalCheckFailedException
+        API-->>C: 409 Conflict
+    end

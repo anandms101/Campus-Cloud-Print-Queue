@@ -1,0 +1,11 @@
+stateDiagram-v2
+    [*] --> HELD: POST /jobs (upload)
+    HELD --> RELEASED: POST /jobs/id/release
+    HELD --> CANCELLED: DELETE /jobs/id
+    RELEASED --> PROCESSING: Worker picks up from SQS
+    PROCESSING --> DONE: Print completes
+    PROCESSING --> FAILED: Unrecoverable error
+    PROCESSING --> PROCESSING: Crash → SQS redeliver → re-process
+    DONE --> [*]
+    CANCELLED --> [*]
+    FAILED --> [*]

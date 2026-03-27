@@ -1,0 +1,17 @@
+flowchart TD
+    A["Poll SQS Queue<br/>WaitTimeSeconds=20"] --> B{Message received?}
+    B -->|No| A
+    B -->|Yes| C["Parse: jobId, s3Key"]
+    C --> D["Conditional Update<br/>RELEASED → PROCESSING"]
+    D -->|Success| H["Download doc from S3"]
+    D -->|ConditionalCheckFailed| E{Current status?}
+    E -->|"PROCESSING + redelivery"| H
+    E -->|DONE| G["Delete SQS message<br/>(idempotent no-op)"]
+    E -->|Other| G
+    H --> I["Simulate print<br/>(sleep 5-15s)"]
+    I --> J["Conditional Update<br/>PROCESSING → DONE"]
+    J --> K["Delete SQS message"]
+    K --> A
+    H -->|S3 error| L["Mark FAILED<br/>Delete message"]
+    L --> A
+    G --> A

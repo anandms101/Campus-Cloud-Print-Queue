@@ -1,0 +1,6 @@
+aws_region        = "us-west-2"
+project_name      = "campus-print"
+api_image_tag     = "latest"
+worker_image_tag  = "latest"
+printer_names     = ["printer-1", "printer-2", "printer-3"]
+api_desired_count = 2

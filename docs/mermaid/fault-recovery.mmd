@@ -1,0 +1,18 @@
+sequenceDiagram
+    participant SQS as SQS Queue
+    participant W1 as Worker (crashes)
+    participant ECS as ECS Service
+    participant W2 as Worker (replacement)
+    participant DDB as DynamoDB
+
+    W1->>DDB: SET status=PROCESSING
+    W1->>W1: Printing...
+    W1-xW1: CRASH (task killed)
+    Note over SQS: Message invisible for 60s
+    ECS->>W2: Launch replacement task
+    Note over SQS: Visibility timeout expires
+    W2->>SQS: ReceiveMessage (receiveCount=2)
+    W2->>DDB: Check status = PROCESSING (stuck)
+    W2->>W2: Re-process (crash recovery)
+    W2->>DDB: SET status=DONE
+    W2->>SQS: DeleteMessage
