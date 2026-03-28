@@ -202,6 +202,8 @@ When a worker crashes: (1) ECS detects the missing task and launches a replaceme
 | PROCESSING → DONE | `status = PROCESSING` | Worker | (internal) |
 | PROCESSING → FAILED | `status = PROCESSING` | Worker | (internal) |
 
+![Example Flow](../public/diagrams/example_flow.png)
+
 ---
 
 ## 5. Key Design Decisions

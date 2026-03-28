@@ -84,6 +84,22 @@ make exp4-fault       # Experiment 4: Fault injection
 | `POST` | `/jobs/{id}/release` | Release to printer (`{"printerName": "printer-1"}`) |
 | `DELETE` | `/jobs/{id}` | Cancel a held job |
 
+### Example upload curl
+
+```bash
+curl -X POST http://<ALB_DNS>/jobs \
+  -F "file=@./report.pdf" \
+  -F "userId=student123"
+```
+
+### Example release curl
+
+```bash
+curl -X POST http://<ALB_DNS>/jobs/<job-id>/release \
+  -H "Content-Type: application/json" \
+  -d '{"printerName":"printer-2"}'
+```
+
 ## Project Structure
 
 ```
