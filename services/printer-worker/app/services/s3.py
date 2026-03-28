@@ -15,3 +15,7 @@ def file_exists(s3_key: str) -> bool:
         return True
     except _client.exceptions.ClientError:
         return False
+
+
+def delete_file(s3_key: str):
+    _client.delete_object(Bucket=S3_BUCKET, Key=s3_key)
