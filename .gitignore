@@ -33,3 +33,16 @@ Thumbs.db
 results/
 *.csv
 *.html
+tests/**/results.json
+
+# Go build artifacts
+services/api-gin/printer-api
+
+# IDE
+.cursor/
+
+# Binary docs (keep .md sources instead)
+docs/milestone-report.pdf
+
+# Test PDFs
+public/book1.pdf

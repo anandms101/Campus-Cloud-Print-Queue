@@ -1,0 +1,8 @@
+# Test and experiment dependencies
+pytest
+pytest-asyncio
+moto[dynamodb,s3,sqs]
+httpx
+locust
+aiohttp
+requests

@@ -1,8 +1,12 @@
+import logging
+
 import boto3
 from datetime import datetime, timezone
 from botocore.exceptions import ClientError
 
 from app.config import DYNAMODB_TABLE, AWS_REGION
+
+logger = logging.getLogger("printer.dynamodb")
 
 _client = boto3.resource("dynamodb", region_name=AWS_REGION)
 _table = _client.Table(DYNAMODB_TABLE)
@@ -76,5 +80,8 @@ def mark_failed(job_id: str):
                 ":now": now,
             },
         )
-    except ClientError:
-        pass
+    except ClientError as e:
+        if e.response["Error"]["Code"] == "ConditionalCheckFailedException":
+            logger.warning(f"mark_failed skipped for {job_id}: status already changed")
+        else:
+            logger.error(f"mark_failed DynamoDB error for {job_id}: {e}")

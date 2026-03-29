@@ -306,6 +306,11 @@ func (a *App) releaseJobHandler(c *gin.Context) {
 
 	if err := a.sendJobToPrinter(ctx, &updated); err != nil {
 		log.Printf("failed to send job to SQS: %v", err)
+		rollbackCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		if rollbackErr := a.rollbackRelease(rollbackCtx, jobID); rollbackErr != nil {
+			log.Printf("rollback to HELD failed for job %s: %v — job stuck in RELEASED", jobID, rollbackErr)
+		}
 		c.JSON(http.StatusInternalServerError, gin.H{"detail": "failed to enqueue job"})
 		return
 	}
@@ -406,7 +411,31 @@ func (a *App) fetchJob(ctx context.Context, jobID string) (*JobItem, error) {
 
 var errNotFound = fmt.Errorf("not found")
 
+func (a *App) rollbackRelease(ctx context.Context, jobID string) error {
+	_, err := a.dynamo.UpdateItem(ctx, &dynamodb.UpdateItemInput{
+		TableName: aws.String(a.config.DynamoTable),
+		Key: map[string]types.AttributeValue{
+			"jobId": &types.AttributeValueMemberS{Value: jobID},
+		},
+		UpdateExpression:    aws.String("SET #s = :held, updatedAt = :now, version = version + :inc REMOVE printerName"),
+		ConditionExpression: aws.String("#s = :released"),
+		ExpressionAttributeNames: map[string]string{
+			"#s": "status",
+		},
+		ExpressionAttributeValues: map[string]types.AttributeValue{
+			":held":     &types.AttributeValueMemberS{Value: "HELD"},
+			":released": &types.AttributeValueMemberS{Value: "RELEASED"},
+			":now":      &types.AttributeValueMemberS{Value: time.Now().UTC().Format(time.RFC3339Nano)},
+			":inc":      &types.AttributeValueMemberN{Value: "1"},
+		},
+	})
+	return err
+}
+
 func (a *App) sendJobToPrinter(ctx context.Context, item *JobItem) error {
+	if item.PrinterName == nil {
+		return fmt.Errorf("job %s has no printer name assigned", item.JobID)
+	}
 	queueURL := a.config.SQSQueueURLs[*item.PrinterName]
 	body, err := json.Marshal(map[string]string{
 		"jobId": item.JobID,

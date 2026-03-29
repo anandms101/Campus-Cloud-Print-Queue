@@ -69,6 +69,23 @@ def release_job(job_id: str, printer_name: str) -> dict:
     return resp["Attributes"]
 
 
+def rollback_release(job_id: str):
+    """Best-effort rollback: RELEASED -> HELD (compensating action when SQS send fails)."""
+    now = datetime.now(timezone.utc).isoformat()
+    _table.update_item(
+        Key={"jobId": job_id},
+        UpdateExpression="SET #s = :new_status, updatedAt = :now, version = version + :inc REMOVE printerName",
+        ConditionExpression="#s = :expected",
+        ExpressionAttributeNames={"#s": "status"},
+        ExpressionAttributeValues={
+            ":new_status": "HELD",
+            ":expected": "RELEASED",
+            ":now": now,
+            ":inc": 1,
+        },
+    )
+
+
 def cancel_job(job_id: str) -> dict:
     """Conditional update: HELD -> CANCELLED. Raises ClientError on conflict."""
     now = datetime.now(timezone.utc).isoformat()

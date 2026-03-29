@@ -65,6 +65,14 @@ The cluster `campus-print-cluster` runs 5 Fargate tasks across 4 services:
 
 **Middleware:** Every request gets a UUID `X-Request-ID` header. All requests are logged as structured JSON: method, path, status code, duration, request ID.
 
+**Hardening:**
+- Uploads are capped at 50 MB (configurable via `MAX_UPLOAD_BYTES`). Requests exceeding this return HTTP 413.
+- Filenames are sanitized with `os.path.basename()` / `filepath.Base()` to prevent path traversal in S3 keys.
+- If DynamoDB write fails after S3 upload, the orphaned S3 object is cleaned up (best-effort).
+- If SQS enqueue fails after DynamoDB marks a job RELEASED, the API rolls back to HELD using a compensating conditional update. The Go API uses `context.Background()` for the rollback so it completes even if the HTTP request context is cancelled.
+- The Go API limits concurrent uploads to 4 via a channel-based semaphore (bulkhead pattern).
+- Docker containers run as a non-root user (`appuser`).
+
 ### 2.5 Printer Worker
 
 ![Worker Flowchart](../public/diagrams/worker-flowchart.png)
@@ -77,6 +85,12 @@ The cluster `campus-print-cluster` runs 5 Fargate tasks across 4 services:
 - If `DONE`: delete message, skip (already completed)
 
 This was validated by Experiment 4 (fault injection): after killing a printer task mid-processing, all 10 jobs recovered to DONE with zero duplicates.
+
+**Reliability features:**
+- **Graceful shutdown**: Handles `SIGTERM` and `SIGINT` signals. When ECS sends SIGTERM (e.g., during a rolling deploy), the worker finishes the current message before exiting instead of being killed mid-processing.
+- **Exponential backoff**: On consecutive poll-loop errors (e.g., AWS outage), the worker backs off exponentially up to 60 seconds instead of hot-looping.
+- **Safe `mark_done` failure handling**: If the `PROCESSING→DONE` conditional update fails (unexpected state), the SQS message is *not* deleted, allowing SQS redelivery to retry rather than silently dropping the job.
+- **`mark_failed` error logging**: DynamoDB errors during best-effort FAILED transitions are logged instead of silently swallowed, distinguishing conditional check failures from actual AWS errors.
 
 ### 2.6 DynamoDB
 
@@ -165,7 +179,7 @@ The API generates a UUID, uploads the document to S3, and creates a DynamoDB ite
 
 > Mermaid source: [`docs/mermaid/release-flow.mmd`](mermaid/release-flow.mmd)
 
-The release endpoint uses a conditional expression (`status = HELD`) to atomically transition to RELEASED. Only if the condition succeeds does the API enqueue to the printer's SQS queue. This prevents double-release.
+The release endpoint uses a conditional expression (`status = HELD`) to atomically transition to RELEASED. Only if the condition succeeds does the API enqueue to the printer's SQS queue. This prevents double-release. If the SQS send fails after the DynamoDB update, the API performs a compensating rollback (`RELEASED→HELD`) using `context.Background()` so the rollback succeeds even if the original HTTP request context has been cancelled.
 
 ### 3.3 Processing Flow
 
@@ -198,6 +212,7 @@ When a worker crashes: (1) ECS detects the missing task and launches a replaceme
 | → HELD | (new item) | API | 201 Created |
 | HELD → RELEASED | `status = HELD` | API | 200 OK |
 | HELD → CANCELLED | `status = HELD` | API | 200 OK |
+| RELEASED → HELD | `status = RELEASED` | API (rollback) | 500 (SQS failed) |
 | RELEASED → PROCESSING | `status = RELEASED` | Worker | (internal) |
 | PROCESSING → DONE | `status = PROCESSING` | Worker | (internal) |
 | PROCESSING → FAILED | `status = PROCESSING` | Worker | (internal) |
@@ -275,3 +290,67 @@ make test-e2e        # Upload → release → wait → verify DONE
 | **Total** | **$0.082** | **~$61** |
 
 **Teardown strategy:** `make teardown` destroys everything. Redeploy takes ~5 minutes.
+
+---
+
+## 7. Testing
+
+### 7.1 Unit Tests
+
+The project has 29 unit tests using **pytest** and **moto** (AWS service mocks) that run without real AWS credentials:
+
+**API tests** (`tests/unit/test_api.py` — 19 tests):
+- Health endpoint returns 200
+- Job creation (success, missing fields, file too large, filename sanitization)
+- Job retrieval (success, not found)
+- Job listing (by user, with status filter, missing userId)
+- Release flow (success, invalid printer, missing printer name, not found, double-release 409)
+- Cancel flow (success, not found, already-released 409)
+
+**Worker tests** (`tests/unit/test_worker.py` — 10 tests):
+- Normal RELEASED → PROCESSING → DONE flow
+- Idempotency: already-DONE job is a no-op
+- S3 download failure transitions to FAILED
+- HELD jobs are skipped (not yet released)
+- Redelivery of PROCESSING job re-processes to DONE
+- `mark_processing`, `mark_done`, `mark_failed` conditional update logic
+
+```bash
+# Run all unit tests
+pip install -r requirements-dev.txt
+pytest tests/unit/ -v
+```
+
+### 7.2 Experiment Tests
+
+Four experiment scripts test the deployed system under realistic conditions:
+
+| Experiment | Tool | What it validates |
+|-----------|------|-------------------|
+| Load test | Locust | Throughput and latency under 50 concurrent users |
+| Contention | asyncio + aiohttp | Exactly one release succeeds among N concurrent attempts |
+| Saturation | requests | All jobs complete when a single printer is overloaded |
+| Fault injection | AWS CLI + requests | Jobs recover to DONE after killing a printer task mid-flight |
+
+### 7.3 CI Pipeline
+
+GitHub Actions (`.github/workflows/ci.yml`) runs on every push and PR to `main`:
+
+| Job | What it checks |
+|-----|----------------|
+| `python-checks` | Compile check, 29 unit tests with moto |
+| `go-checks` | `go vet` and `go build` for the Gin API |
+| `terraform-checks` | `terraform fmt -check`, `terraform init`, `terraform validate` |
+| `docker-build` | Docker build for all 3 images (API, worker, Go API) |
+
+---
+
+## 8. Security Considerations
+
+- **No authentication/authorization** — intentionally out of scope for this course project. A production system would add JWT/OAuth via ALB or API middleware.
+- **No HTTPS** — the ALB listener is HTTP-only. Production would add an ACM certificate.
+- **CORS** — allows all origins without credentials (`allow_credentials=False`). This is valid per the CORS spec for public APIs.
+- **Non-root containers** — both Python Dockerfiles run as `appuser`, not root.
+- **Upload limits** — 50 MB max file size prevents memory exhaustion on Fargate tasks.
+- **Filename sanitization** — `os.path.basename()` / `filepath.Base()` strips path traversal from uploaded filenames.
+- **No secrets in code** — all configuration via environment variables; `terraform.tfvars` and `.env` are gitignored.

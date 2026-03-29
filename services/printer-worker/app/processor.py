@@ -58,7 +58,7 @@ def process_message(message: dict) -> bool:
             logger.info(f"[{PRINTER_NAME}] Deleted S3 object {s3_key} for job {job_id}")
         except Exception as e:
             logger.warning(f"[{PRINTER_NAME}] Failed to delete S3 object {s3_key} for job {job_id}: {e}")
-    else:
-        logger.warning(f"[{PRINTER_NAME}] Job {job_id} state was unexpected when marking done")
+        return True
 
-    return True
+    logger.warning(f"[{PRINTER_NAME}] Job {job_id} state was unexpected when marking done — will not delete message")
+    return False

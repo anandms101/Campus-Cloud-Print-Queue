@@ -78,11 +78,13 @@ make exp4-fault       # Experiment 4: Fault injection
 | Method | Path | Description |
 |--------|------|-------------|
 | `GET` | `/health` | Health check |
-| `POST` | `/jobs` | Upload a print job (multipart: `file` + `userId`) |
+| `POST` | `/jobs` | Upload a print job (multipart: `file` + `userId`, max 50 MB) |
 | `GET` | `/jobs/{id}` | Get job status |
 | `GET` | `/jobs?userId=X` | List user's jobs |
 | `POST` | `/jobs/{id}/release` | Release to printer (`{"printerName": "printer-1"}`) |
 | `DELETE` | `/jobs/{id}` | Cancel a held job |
+
+> **Interactive API docs:** When the API is running, visit `/docs` (Swagger UI) or `/redoc` for auto-generated interactive documentation.
 
 ### Example upload curl
 
@@ -103,7 +105,8 @@ curl -X POST http://<ALB_DNS>/jobs/<job-id>/release \
 ## Project Structure
 
 ```
-├── Makefile                # Build, deploy, test, teardown
+├── Makefile                # Build, deploy, test, teardown (Python API)
+├── Makefile.gin            # Alternative Makefile for Go/Gin API
 ├── infra/                  # Terraform (9 modules)
 │   └── modules/
 │       ├── networking/     # VPC, 2 public subnets, security groups
@@ -116,7 +119,8 @@ curl -X POST http://<ALB_DNS>/jobs/<job-id>/release \
 │       ├── ecs/            # Cluster + API (2) + printers (3x1)
 │       └── cloudwatch/     # Log groups + dashboard
 ├── services/
-│   ├── api/                # FastAPI REST service (Python)
+│   ├── api/                # FastAPI REST service (Python — default)
+│   ├── api-gin/            # Gin REST service (Go — alternative)
 │   └── printer-worker/     # SQS-polling processor (Python)
 ├── tests/
 │   ├── experiment1_load_test/     # Locust load test
@@ -124,8 +128,10 @@ curl -X POST http://<ALB_DNS>/jobs/<job-id>/release \
 │   ├── experiment3_saturation/    # Queue backpressure test
 │   └── experiment4_fault_injection/ # Kill + recovery test
 ├── scripts/                # Seed data, health checks
-└── docs/                   # Architecture doc, report
+└── docs/                   # Architecture doc, Mermaid sources, report
 ```
+
+> **Go API variant:** To deploy using the Go/Gin API instead of FastAPI, run `make -f Makefile.gin deploy-fresh`.
 
 ## Cost
 
@@ -148,3 +154,47 @@ Redeploy from scratch takes ~5 minutes.
 4. **Idempotent processing** — conditional state transitions + redelivery handling ensures exactly-once over at-least-once SQS
 5. **Public subnets only** (no NAT Gateway) — saves ~$33/month for a course project
 6. **Standard SQS** (not FIFO) — ordering not required, lower cost, higher throughput
+
+## Testing
+
+### Unit tests
+
+29 unit tests run locally with mocked AWS (no credentials needed):
+
+```bash
+pip install -r requirements-dev.txt
+pytest tests/unit/ -v
+```
+
+Tests cover the full API surface (upload, release, cancel, list, error cases) and the worker state machine (idempotency, redelivery, failure handling).
+
+### CI
+
+GitHub Actions runs on every push and PR to `main`:
+- Python compile + 29 unit tests (moto)
+- Go vet + build
+- Terraform fmt + validate
+- Docker build for all 3 images
+
+### Experiment tests
+
+Run against a deployed stack:
+
+```bash
+make exp1-load        # Locust: 50 users, 60s
+make exp2-contention  # Concurrent release race
+make exp3-saturation  # Overload one printer
+make exp4-fault       # Kill task, verify recovery
+```
+
+## Known Limitations
+
+This is a course project / proof-of-concept. The following are intentionally out of scope:
+
+- **No authentication/authorization** — any client can create, read, release, or cancel any job. A production system would add JWT/OAuth and per-user ownership checks.
+- **No HTTPS** — the ALB listener is HTTP-only. Production would add an ACM certificate and HTTPS listener.
+- **No auto-scaling** — printer workers are fixed at 1 task each to model physical devices.
+
+## License
+
+This project is licensed under the [Apache License 2.0](LICENSE).

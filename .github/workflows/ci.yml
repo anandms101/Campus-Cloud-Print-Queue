@@ -1,0 +1,92 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  python-checks:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install API dependencies
+        run: pip install -r services/api/requirements.txt
+
+      - name: Install worker dependencies
+        run: pip install -r services/printer-worker/requirements.txt
+
+      - name: Install test dependencies
+        run: pip install -r requirements-dev.txt
+
+      - name: Compile check — API
+        run: python -m py_compile services/api/app/main.py
+
+      - name: Compile check — Worker
+        run: python -m py_compile services/printer-worker/app/main.py
+
+      - name: Run unit tests
+        run: pytest tests/unit/ -v
+        env:
+          AWS_DEFAULT_REGION: us-west-2
+          DYNAMODB_TABLE: test-table
+          S3_BUCKET: test-bucket
+          SQS_QUEUE_URLS: "{}"
+
+  go-checks:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.25"
+
+      - name: Go vet
+        working-directory: services/api-gin
+        run: go vet ./...
+
+      - name: Go build
+        working-directory: services/api-gin
+        run: go build ./...
+
+  terraform-checks:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: "1.9"
+
+      - name: Terraform fmt check
+        working-directory: infra
+        run: terraform fmt -check -recursive
+
+      - name: Terraform init
+        working-directory: infra
+        run: terraform init -backend=false
+
+      - name: Terraform validate
+        working-directory: infra
+        run: terraform validate
+
+  docker-build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build API image
+        run: docker build --platform linux/amd64 -t campus-print-api services/api/
+
+      - name: Build Worker image
+        run: docker build --platform linux/amd64 -t campus-print-worker services/printer-worker/
+
+      - name: Build Go API image
+        run: docker build --platform linux/amd64 -t campus-print-api-gin services/api-gin/

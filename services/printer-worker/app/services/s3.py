@@ -9,13 +9,5 @@ def download_file(s3_key: str) -> bytes:
     return resp["Body"].read()
 
 
-def file_exists(s3_key: str) -> bool:
-    try:
-        _client.head_object(Bucket=S3_BUCKET, Key=s3_key)
-        return True
-    except _client.exceptions.ClientError:
-        return False
-
-
 def delete_file(s3_key: str):
     _client.delete_object(Bucket=S3_BUCKET, Key=s3_key)
