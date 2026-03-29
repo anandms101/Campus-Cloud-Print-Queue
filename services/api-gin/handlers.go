@@ -32,6 +32,8 @@ type App struct {
 	router *gin.Engine
 }
 
+var uploadSemaphore = make(chan struct{}, 4)
+
 func NewApp(cfg Config, awsCfg aws.Config) *App {
 	dynamo, s3client, sqsclient := NewAWSClients(awsCfg)
 	app := &App{
@@ -64,6 +66,14 @@ func (a *App) healthHandler(c *gin.Context) {
 }
 
 func (a *App) createJobHandler(c *gin.Context) {
+	select {
+	case uploadSemaphore <- struct{}{}:
+		defer func() { <-uploadSemaphore }()
+	default:
+		c.JSON(http.StatusTooManyRequests, gin.H{"detail": "too many active uploads, please try again later"})
+		return
+	}
+
 	userID := c.PostForm("userId")
 	if userID == "" {
 		c.JSON(http.StatusBadRequest, gin.H{"detail": "userId is required"})
