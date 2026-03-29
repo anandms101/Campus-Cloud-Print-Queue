@@ -9,8 +9,7 @@ Usage:
 import os
 import random
 
-from locust import HttpUser, task, between, constant
-import requests
+from locust import HttpUser, task, constant
 
 
 class UploadOnlyUser(HttpUser):
@@ -35,18 +34,15 @@ class UploadOnlyUser(HttpUser):
             self._post_job(files, data)
 
     def _post_job(self, files, data):
-        try:
-            with self.client.post(
-                "/jobs",
-                files=files,
-                data=data,
-                catch_response=True,
-                timeout=300,
-                name="POST /jobs",
-            ) as resp:
-                if resp.status_code == 201:
-                    resp.success()
-                else:
-                    resp.failure(f"Upload failed: {resp.status_code} - {resp.text}")
-        except requests.RequestException as exc:
-            raise
+        with self.client.post(
+            "/jobs",
+            files=files,
+            data=data,
+            catch_response=True,
+            timeout=300,
+            name="POST /jobs",
+        ) as resp:
+            if resp.status_code == 201:
+                resp.success()
+            else:
+                resp.failure(f"Upload failed: {resp.status_code} - {resp.text}")

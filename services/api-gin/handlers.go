@@ -1,11 +1,9 @@
 package main
 
 import (
-	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
-	"io"
 	"log"
 	"net/http"
 	"path/filepath"
@@ -36,12 +34,14 @@ var uploadSemaphore = make(chan struct{}, 4)
 
 func NewApp(cfg Config, awsCfg aws.Config) *App {
 	dynamo, s3client, sqsclient := NewAWSClients(awsCfg)
+	r := gin.New()
+	r.Use(requestIDMiddleware(), jsonAccessLogger())
 	app := &App{
 		config: cfg,
 		dynamo: dynamo,
 		s3:     s3client,
 		sqs:    sqsclient,
-		router: gin.Default(),
+		router: r,
 	}
 
 	app.router.GET("/health", app.healthHandler)
@@ -74,6 +74,8 @@ func (a *App) createJobHandler(c *gin.Context) {
 		return
 	}
 
+	ctx := c.Request.Context()
+
 	userID := c.PostForm("userId")
 	if userID == "" {
 		c.JSON(http.StatusBadRequest, gin.H{"detail": "userId is required"})
@@ -93,12 +95,6 @@ func (a *App) createJobHandler(c *gin.Context) {
 	}
 	defer file.Close()
 
-	content, err := io.ReadAll(file)
-	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"detail": "failed to read uploaded file"})
-		return
-	}
-
 	jobID := uuid.NewString()
 	fileName := filepath.Base(fileHeader.Filename)
 	s3Key := fmt.Sprintf("uploads/%s/%s", jobID, fileName)
@@ -108,11 +104,12 @@ func (a *App) createJobHandler(c *gin.Context) {
 		contentType = "application/octet-stream"
 	}
 
-	_, err = a.s3.PutObject(context.Background(), &s3.PutObjectInput{
-		Bucket:      aws.String(a.config.S3Bucket),
-		Key:         aws.String(s3Key),
-		Body:        bytes.NewReader(content),
-		ContentType: aws.String(contentType),
+	_, err = a.s3.PutObject(ctx, &s3.PutObjectInput{
+		Bucket:        aws.String(a.config.S3Bucket),
+		Key:           aws.String(s3Key),
+		Body:          file,
+		ContentType:   aws.String(contentType),
+		ContentLength: aws.Int64(fileHeader.Size),
 	})
 	if err != nil {
 		log.Printf("failed to upload to S3: %v", err)
@@ -140,12 +137,23 @@ func (a *App) createJobHandler(c *gin.Context) {
 		return
 	}
 
-	_, err = a.dynamo.PutItem(context.Background(), &dynamodb.PutItemInput{
+	_, err = a.dynamo.PutItem(ctx, &dynamodb.PutItemInput{
 		TableName: aws.String(a.config.DynamoTable),
 		Item:      av,
 	})
 	if err != nil {
 		log.Printf("failed to save item to DynamoDB: %v", err)
+
+		// Best-effort cleanup of the uploaded S3 object to avoid orphans.
+		cleanupCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		if _, delErr := a.s3.DeleteObject(cleanupCtx, &s3.DeleteObjectInput{
+			Bucket: aws.String(a.config.S3Bucket),
+			Key:    aws.String(s3Key),
+		}); delErr != nil {
+			log.Printf("failed to delete orphaned S3 object %s: %v", s3Key, delErr)
+		}
+
 		c.JSON(http.StatusInternalServerError, gin.H{"detail": "failed to save job"})
 		return
 	}
@@ -155,7 +163,7 @@ func (a *App) createJobHandler(c *gin.Context) {
 
 func (a *App) getJobHandler(c *gin.Context) {
 	jobID := c.Param("id")
-	item, err := a.fetchJob(jobID)
+	item, err := a.fetchJob(c.Request.Context(), jobID)
 	if err != nil {
 		if err == errNotFound {
 			c.JSON(http.StatusNotFound, gin.H{"detail": "Job not found"})
@@ -193,7 +201,7 @@ func (a *App) listJobsHandler(c *gin.Context) {
 		return
 	}
 
-	resp, err := a.dynamo.Query(context.Background(), &dynamodb.QueryInput{
+	resp, err := a.dynamo.Query(c.Request.Context(), &dynamodb.QueryInput{
 		TableName:                 aws.String(a.config.DynamoTable),
 		IndexName:                 aws.String("userId-createdAt-index"),
 		KeyConditionExpression:    expr.KeyCondition(),
@@ -239,7 +247,9 @@ func (a *App) releaseJobHandler(c *gin.Context) {
 		return
 	}
 
-	item, err := a.fetchJob(jobID)
+	ctx := c.Request.Context()
+
+	_, err := a.fetchJob(ctx, jobID)
 	if err != nil {
 		if err == errNotFound {
 			c.JSON(http.StatusNotFound, gin.H{"detail": "Job not found"})
@@ -251,7 +261,7 @@ func (a *App) releaseJobHandler(c *gin.Context) {
 	}
 
 	updatedAt := time.Now().UTC().Format(time.RFC3339Nano)
-	resp, err := a.dynamo.UpdateItem(context.Background(), &dynamodb.UpdateItemInput{
+	resp, err := a.dynamo.UpdateItem(ctx, &dynamodb.UpdateItemInput{
 		TableName: aws.String(a.config.DynamoTable),
 		Key: map[string]types.AttributeValue{
 			"jobId": &types.AttributeValueMemberS{Value: jobID},
@@ -273,7 +283,13 @@ func (a *App) releaseJobHandler(c *gin.Context) {
 	if err != nil {
 		var cce *types.ConditionalCheckFailedException
 		if errors.As(err, &cce) {
-			c.JSON(http.StatusConflict, gin.H{"detail": fmt.Sprintf("Job cannot be released. Current status: %s", item.Status)})
+			// Re-fetch to report the actual current status in case it changed concurrently.
+			currentItem, fetchErr := a.fetchJob(ctx, jobID)
+			status := "unknown"
+			if fetchErr == nil {
+				status = currentItem.Status
+			}
+			c.JSON(http.StatusConflict, gin.H{"detail": fmt.Sprintf("Job cannot be released. Current status: %s", status)})
 			return
 		}
 		log.Printf("failed to release job: %v", err)
@@ -288,7 +304,7 @@ func (a *App) releaseJobHandler(c *gin.Context) {
 		return
 	}
 
-	if err := a.sendJobToPrinter(&updated); err != nil {
+	if err := a.sendJobToPrinter(ctx, &updated); err != nil {
 		log.Printf("failed to send job to SQS: %v", err)
 		c.JSON(http.StatusInternalServerError, gin.H{"detail": "failed to enqueue job"})
 		return
@@ -299,7 +315,9 @@ func (a *App) releaseJobHandler(c *gin.Context) {
 
 func (a *App) cancelJobHandler(c *gin.Context) {
 	jobID := c.Param("id")
-	item, err := a.fetchJob(jobID)
+	ctx := c.Request.Context()
+
+	_, err := a.fetchJob(ctx, jobID)
 	if err != nil {
 		if err == errNotFound {
 			c.JSON(http.StatusNotFound, gin.H{"detail": "Job not found"})
@@ -310,7 +328,7 @@ func (a *App) cancelJobHandler(c *gin.Context) {
 		return
 	}
 
-	resp, err := a.dynamo.UpdateItem(context.Background(), &dynamodb.UpdateItemInput{
+	resp, err := a.dynamo.UpdateItem(ctx, &dynamodb.UpdateItemInput{
 		TableName: aws.String(a.config.DynamoTable),
 		Key: map[string]types.AttributeValue{
 			"jobId": &types.AttributeValueMemberS{Value: jobID},
@@ -331,7 +349,14 @@ func (a *App) cancelJobHandler(c *gin.Context) {
 	if err != nil {
 		var cce *types.ConditionalCheckFailedException
 		if errors.As(err, &cce) {
-			c.JSON(http.StatusConflict, gin.H{"detail": fmt.Sprintf("Job cannot be cancelled. Current status: %s", item.Status)})
+			// Re-fetch to obtain the actual current status in case it changed concurrently.
+			refreshed, fetchErr := a.fetchJob(ctx, jobID)
+			if fetchErr == nil {
+				c.JSON(http.StatusConflict, gin.H{"detail": fmt.Sprintf("Job cannot be cancelled. Current status: %s", refreshed.Status)})
+				return
+			}
+			log.Printf("failed to reload job after conditional check failure for %s: %v", jobID, fetchErr)
+			c.JSON(http.StatusConflict, gin.H{"detail": "Job cannot be cancelled because its status changed; please retry"})
 			return
 		}
 		log.Printf("failed to cancel job: %v", err)
@@ -347,7 +372,7 @@ func (a *App) cancelJobHandler(c *gin.Context) {
 	}
 
 	if updated.S3Key != "" {
-		if _, err := a.s3.DeleteObject(context.Background(), &s3.DeleteObjectInput{
+		if _, err := a.s3.DeleteObject(ctx, &s3.DeleteObjectInput{
 			Bucket: aws.String(a.config.S3Bucket),
 			Key:    aws.String(updated.S3Key),
 		}); err != nil {
@@ -358,8 +383,8 @@ func (a *App) cancelJobHandler(c *gin.Context) {
 	c.JSON(http.StatusOK, updated)
 }
 
-func (a *App) fetchJob(jobID string) (*JobItem, error) {
-	resp, err := a.dynamo.GetItem(context.Background(), &dynamodb.GetItemInput{
+func (a *App) fetchJob(ctx context.Context, jobID string) (*JobItem, error) {
+	resp, err := a.dynamo.GetItem(ctx, &dynamodb.GetItemInput{
 		TableName: aws.String(a.config.DynamoTable),
 		Key: map[string]types.AttributeValue{
 			"jobId": &types.AttributeValueMemberS{Value: jobID},
@@ -381,7 +406,7 @@ func (a *App) fetchJob(jobID string) (*JobItem, error) {
 
 var errNotFound = fmt.Errorf("not found")
 
-func (a *App) sendJobToPrinter(item *JobItem) error {
+func (a *App) sendJobToPrinter(ctx context.Context, item *JobItem) error {
 	queueURL := a.config.SQSQueueURLs[*item.PrinterName]
 	body, err := json.Marshal(map[string]string{
 		"jobId": item.JobID,
@@ -391,7 +416,7 @@ func (a *App) sendJobToPrinter(item *JobItem) error {
 		return err
 	}
 
-	_, err = a.sqs.SendMessage(context.Background(), &sqs.SendMessageInput{
+	_, err = a.sqs.SendMessage(ctx, &sqs.SendMessageInput{
 		QueueUrl:    aws.String(queueURL),
 		MessageBody: aws.String(string(body)),
 	})
