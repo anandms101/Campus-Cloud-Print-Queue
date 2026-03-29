@@ -165,6 +165,12 @@ If the job is not in HELD state, DynamoDB rejects with `ConditionalCheckFailedEx
 
 ## 3. Data Flows
 
+### End-to-End Data Flow
+
+![Data Flow](../public/diagrams/data-flow.png)
+
+> Mermaid source: [`docs/mermaid/data-flow.mmd`](mermaid/data-flow.mmd)
+
 ### 3.1 Upload Flow
 
 ![Upload Flow](../public/diagrams/upload-flow.png)

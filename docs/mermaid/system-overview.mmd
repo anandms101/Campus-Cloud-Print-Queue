@@ -1,49 +1,128 @@
 graph TB
-    Client([Student Client<br/>Browser / CLI / Mobile])
+    classDef client fill:#232F3E,stroke:#FF9900,stroke-width:2px,color:#fff
+    classDef alb fill:#8C4FFF,stroke:#fff,stroke-width:2px,color:#fff
+    classDef ecs fill:#FF9900,stroke:#fff,stroke-width:2px,color:#fff
+    classDef dynamo fill:#3334CB,stroke:#fff,stroke-width:2px,color:#fff
+    classDef s3 fill:#3F8624,stroke:#fff,stroke-width:2px,color:#fff
+    classDef sqs fill:#FF4F8B,stroke:#fff,stroke-width:2px,color:#fff
+    classDef dlq fill:#CC2264,stroke:#fff,stroke-width:1px,color:#fff
+    classDef cw fill:#FF7100,stroke:#fff,stroke-width:2px,color:#fff
+    classDef ecr fill:#FF9900,stroke:#fff,stroke-width:1px,color:#fff
+    classDef net fill:#8C4FFF,stroke:#fff,stroke-width:1px,color:#fff
+    classDef iam fill:#DD344C,stroke:#fff,stroke-width:1px,color:#fff
+    classDef tf fill:#7B42BC,stroke:#fff,stroke-width:2px,color:#fff
 
-    subgraph AWS["AWS Cloud — us-west-2"]
-        subgraph PUB["Public Subnets · 2 AZs"]
-            ALB["Application Load Balancer<br/>Port 80 · HTTP"]
+    Client["fa:fa-user Student Client<br/>Browser / cURL / Mobile App"]:::client
+
+    subgraph AWS["<b>AWS Cloud</b> &mdash; us-west-2"]
+        direction TB
+
+        subgraph VPC["<b>VPC</b> 10.0.0.0/16"]
+            direction TB
+
+            subgraph PUB["<b>Public Subnets</b> &mdash; 2 Availability Zones"]
+                direction LR
+
+                subgraph AZ1["<b>AZ: us-west-2a</b><br/>10.0.1.0/24"]
+                    ALB_NODE1["ALB Node"]:::alb
+                end
+
+                subgraph AZ2["<b>AZ: us-west-2b</b><br/>10.0.2.0/24"]
+                    ALB_NODE2["ALB Node"]:::alb
+                end
+            end
+
+            ALB["<b>Application Load Balancer</b><br/>HTTP :80 &#8594; Target Group :8000<br/>Health: GET /health (30s interval)"]:::alb
         end
 
-        subgraph ECS["ECS Fargate Cluster"]
-            API1["API Task 1<br/>FastAPI · Uvicorn"]
-            API2["API Task 2<br/>FastAPI · Uvicorn"]
-            P1["Printer-1 Worker<br/>SQS Poller"]
-            P2["Printer-2 Worker<br/>SQS Poller"]
-            P3["Printer-3 Worker<br/>SQS Poller"]
+        IGW["<b>Internet Gateway</b>"]:::net
+
+        subgraph ECS_CLUSTER["<b>ECS Fargate Cluster</b> &mdash; campus-print-cluster"]
+            direction TB
+
+            subgraph API_SVC["<b>API Service</b> &mdash; Desired: 2 tasks"]
+                direction LR
+                API1["<b>API Task 1</b><br/>FastAPI + Uvicorn<br/>0.25 vCPU / 512 MiB"]:::ecs
+                API2["<b>API Task 2</b><br/>FastAPI + Uvicorn<br/>0.25 vCPU / 512 MiB"]:::ecs
+            end
+
+            subgraph PRINTER_SVC["<b>Printer Worker Services</b> &mdash; 1 task each (fixed capacity)"]
+                direction LR
+                P1["<b>Printer-1 Worker</b><br/>SQS Long Poller<br/>0.25 vCPU / 512 MiB"]:::ecs
+                P2["<b>Printer-2 Worker</b><br/>SQS Long Poller<br/>0.25 vCPU / 512 MiB"]:::ecs
+                P3["<b>Printer-3 Worker</b><br/>SQS Long Poller<br/>0.25 vCPU / 512 MiB"]:::ecs
+            end
         end
 
-        subgraph DATA["Managed Data Services"]
-            DDB[("DynamoDB<br/>campus-print-jobs<br/>PK: jobId")]
-            S3[("S3 Bucket<br/>Document Storage")]
-            SQS1[["SQS: printer-1"]]
-            SQS2[["SQS: printer-2"]]
-            SQS3[["SQS: printer-3"]]
-            DLQ1[["DLQ: printer-1"]]
-            DLQ2[["DLQ: printer-2"]]
-            DLQ3[["DLQ: printer-3"]]
+        subgraph DATA_PLANE["<b>Data &amp; Messaging Services</b>"]
+            direction TB
+
+            DDB[("<b>Amazon DynamoDB</b><br/>Table: campus-print-jobs<br/>PK: jobId | GSI: userId-createdAt<br/>PAY_PER_REQUEST | TTL enabled")]:::dynamo
+
+            S3[("<b>Amazon S3</b><br/>Bucket: campus-print-docs-*<br/>Key: uploads/jobId/fileName<br/>Lifecycle: 1-day expiry")]:::s3
+
+            subgraph SQS_GROUP["<b>Amazon SQS &mdash; Per-Printer Queues</b><br/>Standard | Visibility: 60s | Long Poll: 20s | Retention: 1 day"]
+                direction LR
+                SQS1["<b>printer-1</b><br/>Queue"]:::sqs
+                SQS2["<b>printer-2</b><br/>Queue"]:::sqs
+                SQS3["<b>printer-3</b><br/>Queue"]:::sqs
+            end
+
+            subgraph DLQ_GROUP["<b>Dead-Letter Queues</b><br/>maxReceiveCount: 3 | Retention: 7 days"]
+                direction LR
+                DLQ1["<b>printer-1-dlq</b>"]:::dlq
+                DLQ2["<b>printer-2-dlq</b>"]:::dlq
+                DLQ3["<b>printer-3-dlq</b>"]:::dlq
+            end
         end
 
-        subgraph OBS["Observability"]
-            CWL["CloudWatch Logs<br/>Structured JSON"]
-            CWD["CloudWatch Dashboard"]
+        subgraph OBSERVABILITY["<b>Observability</b>"]
+            direction LR
+            CWL["<b>CloudWatch Logs</b><br/>Structured JSON<br/>7-day retention"]:::cw
+            CWD["<b>CloudWatch Dashboard</b><br/>ALB latency (p50/p95/p99)<br/>SQS depth | DDB capacity<br/>ECS CPU/Memory"]:::cw
         end
+
+        subgraph CICD["<b>Container Registry</b>"]
+            direction LR
+            ECR_API["<b>ECR</b><br/>campus-print-api"]:::ecr
+            ECR_WORKER["<b>ECR</b><br/>campus-print-worker"]:::ecr
+        end
+
+        IAM["<b>IAM LabRole</b><br/>Execution + Task Roles"]:::iam
     end
 
-    Client -->|HTTP| ALB
-    ALB --> API1
-    ALB --> API2
-    API1 & API2 -->|Read/Write| DDB
-    API1 & API2 -->|Upload| S3
-    API1 & API2 -->|Enqueue| SQS1 & SQS2 & SQS3
-    SQS1 -->|Long Poll| P1
-    SQS2 -->|Long Poll| P2
-    SQS3 -->|Long Poll| P3
-    P1 & P2 & P3 -->|Fetch Doc| S3
-    P1 & P2 & P3 -->|Update State| DDB
-    SQS1 -.->|After 3 fails| DLQ1
-    SQS2 -.->|After 3 fails| DLQ2
-    SQS3 -.->|After 3 fails| DLQ3
-    ECS -.->|Logs| CWL
-    CWL -.-> CWD
+    TF["<b>Terraform IaC</b><br/>9 modules | ~40 resources"]:::tf
+
+    %% ---- Traffic Flow ----
+    Client -->|"HTTPS/HTTP Request"| IGW
+    IGW --> ALB
+    ALB -->|"Round Robin"| API1
+    ALB -->|"Round Robin"| API2
+
+    %% ---- API Data Flow ----
+    API1 & API2 -->|"Conditional Writes<br/>(Optimistic Concurrency)"| DDB
+    API1 & API2 -->|"PutObject<br/>(Upload Document)"| S3
+    API1 & API2 -->|"SendMessage<br/>(Release Job)"| SQS1 & SQS2 & SQS3
+
+    %% ---- Worker Flow ----
+    SQS1 -->|"ReceiveMessage<br/>(Long Poll 20s)"| P1
+    SQS2 -->|"ReceiveMessage<br/>(Long Poll 20s)"| P2
+    SQS3 -->|"ReceiveMessage<br/>(Long Poll 20s)"| P3
+    P1 & P2 & P3 -->|"GetObject<br/>(Fetch Document)"| S3
+    P1 & P2 & P3 -->|"UpdateItem<br/>(State Transitions)"| DDB
+
+    %% ---- DLQ ----
+    SQS1 -.->|"After 3 failures"| DLQ1
+    SQS2 -.->|"After 3 failures"| DLQ2
+    SQS3 -.->|"After 3 failures"| DLQ3
+
+    %% ---- Observability ----
+    ECS_CLUSTER -.->|"awslogs driver"| CWL
+    CWL -.->|"Metrics"| CWD
+
+    %% ---- Container Registry ----
+    ECR_API -.->|"Pull Image"| API1 & API2
+    ECR_WORKER -.->|"Pull Image"| P1 & P2 & P3
+
+    %% ---- IaC ----
+    TF -.->|"Provision &amp; Manage"| AWS

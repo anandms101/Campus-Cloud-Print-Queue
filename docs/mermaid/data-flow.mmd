@@ -1,0 +1,64 @@
+sequenceDiagram
+    autonumber
+    participant C as Student Client
+    participant ALB as ALB<br/>(HTTP :80)
+    participant API as FastAPI Service<br/>(ECS Fargate x2)
+    participant DDB as DynamoDB<br/>(campus-print-jobs)
+    participant S3 as S3 Bucket<br/>(campus-print-docs)
+    participant SQS as SQS Queue<br/>(per-printer)
+    participant W as Printer Worker<br/>(ECS Fargate x3)
+
+    rect rgb(219, 234, 254)
+        Note over C,S3: Upload Flow (POST /jobs)
+        C->>+ALB: POST /jobs (multipart: file + userId)
+        ALB->>+API: Forward request
+        API->>API: Generate UUID jobId<br/>Sanitize filename
+        API->>+S3: PutObject (uploads/{jobId}/{fileName})
+        S3-->>-API: 200 OK
+        API->>+DDB: PutItem (status=HELD, version=1, TTL=24h)
+        DDB-->>-API: 200 OK
+        API-->>-ALB: 201 {jobId, status: HELD}
+        ALB-->>-C: 201 Created
+    end
+
+    rect rgb(237, 220, 255)
+        Note over C,SQS: Release Flow (POST /jobs/{id}/release)
+        C->>+ALB: POST /jobs/{id}/release {printerName}
+        ALB->>+API: Forward request
+        API->>+DDB: UpdateItem<br/>SET status=RELEASED, printerName<br/>CONDITION status=HELD
+        DDB-->>-API: 200 OK (version=2)
+        API->>+SQS: SendMessage ({jobId, s3Key, printerName})
+        SQS-->>-API: 200 OK
+        API-->>-ALB: 200 {status: RELEASED}
+        ALB-->>-C: 200 OK
+
+        Note over API,SQS: On SQS failure: compensating write<br/>RELEASED -> HELD (rollback)
+    end
+
+    rect rgb(209, 250, 229)
+        Note over SQS,DDB: Processing Flow (Worker)
+        loop Long Poll (20s wait)
+            W->>+SQS: ReceiveMessage (MaxMessages=1)
+            SQS-->>-W: Message {jobId, s3Key}
+        end
+        W->>+DDB: UpdateItem<br/>SET status=PROCESSING<br/>CONDITION status=RELEASED
+        DDB-->>-W: 200 OK (version=3)
+        W->>+S3: GetObject (fetch document)
+        S3-->>-W: Document bytes
+        W->>W: Simulate printing<br/>(process document)
+        W->>+DDB: UpdateItem<br/>SET status=DONE<br/>CONDITION status=PROCESSING
+        DDB-->>-W: 200 OK (version=4)
+        W->>SQS: DeleteMessage
+    end
+
+    rect rgb(254, 226, 226)
+        Note over SQS,DDB: Fault Recovery (crash mid-processing)
+        Note right of W: Worker crashes after PROCESSING<br/>ECS replaces task (~60s)<br/>SQS visibility timeout expires
+        SQS->>+W: Redeliver message (receiveCount > 1)
+        W->>+DDB: GetItem (check current status)
+        DDB-->>-W: status=PROCESSING, receiveCount>1
+        W->>W: Re-process (idempotent)
+        W->>+DDB: UpdateItem SET status=DONE
+        DDB-->>-W: 200 OK
+        W->>-SQS: DeleteMessage
+    end

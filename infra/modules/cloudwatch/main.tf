@@ -20,8 +20,8 @@ resource "aws_cloudwatch_dashboard" "main" {
         width  = 12
         height = 6
         properties = {
-          title   = "ALB Request Count & Latency"
-          region  = var.aws_region
+          title  = "ALB Request Count & Latency"
+          region = var.aws_region
           metrics = [
             ["AWS/ApplicationELB", "RequestCount", "LoadBalancer", var.alb_arn_suffix, { stat = "Sum" }],
             ["AWS/ApplicationELB", "TargetResponseTime", "LoadBalancer", var.alb_arn_suffix, { stat = "p50" }],
@@ -38,8 +38,8 @@ resource "aws_cloudwatch_dashboard" "main" {
         width  = 12
         height = 6
         properties = {
-          title   = "ALB HTTP Errors"
-          region  = var.aws_region
+          title  = "ALB HTTP Errors"
+          region = var.aws_region
           metrics = [
             ["AWS/ApplicationELB", "HTTPCode_Target_4XX_Count", "LoadBalancer", var.alb_arn_suffix, { stat = "Sum" }],
             ["AWS/ApplicationELB", "HTTPCode_Target_5XX_Count", "LoadBalancer", var.alb_arn_suffix, { stat = "Sum" }]
@@ -54,8 +54,8 @@ resource "aws_cloudwatch_dashboard" "main" {
         width  = 12
         height = 6
         properties = {
-          title   = "SQS Queue Depth (Messages Visible)"
-          region  = var.aws_region
+          title  = "SQS Queue Depth (Messages Visible)"
+          region = var.aws_region
           metrics = [
             for name in var.printer_names :
             ["AWS/SQS", "ApproximateNumberOfMessagesVisible", "QueueName", "${var.project_name}-${name}"]
@@ -70,8 +70,8 @@ resource "aws_cloudwatch_dashboard" "main" {
         width  = 12
         height = 6
         properties = {
-          title   = "DynamoDB Consumed Capacity"
-          region  = var.aws_region
+          title  = "DynamoDB Consumed Capacity"
+          region = var.aws_region
           metrics = [
             ["AWS/DynamoDB", "ConsumedReadCapacityUnits", "TableName", "${var.project_name}-jobs", { stat = "Sum" }],
             ["AWS/DynamoDB", "ConsumedWriteCapacityUnits", "TableName", "${var.project_name}-jobs", { stat = "Sum" }]
@@ -86,8 +86,8 @@ resource "aws_cloudwatch_dashboard" "main" {
         width  = 12
         height = 6
         properties = {
-          title   = "ECS CPU Utilization"
-          region  = var.aws_region
+          title  = "ECS CPU Utilization"
+          region = var.aws_region
           metrics = [
             ["AWS/ECS", "CPUUtilization", "ClusterName", "${var.project_name}-cluster", "ServiceName", "${var.project_name}-api", { stat = "Average" }]
           ]
@@ -101,8 +101,8 @@ resource "aws_cloudwatch_dashboard" "main" {
         width  = 12
         height = 6
         properties = {
-          title   = "ECS Memory Utilization"
-          region  = var.aws_region
+          title  = "ECS Memory Utilization"
+          region = var.aws_region
           metrics = [
             ["AWS/ECS", "MemoryUtilization", "ClusterName", "${var.project_name}-cluster", "ServiceName", "${var.project_name}-api", { stat = "Average" }]
           ]
