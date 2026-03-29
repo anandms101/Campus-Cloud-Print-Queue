@@ -12,6 +12,8 @@ import random
 
 from locust import HttpUser, task, between
 
+PRINTERS = ["printer-1", "printer-2", "printer-3"]
+
 
 class PrintQueueUser(HttpUser):
     wait_time = between(1, 3)
@@ -63,7 +65,7 @@ class PrintQueueUser(HttpUser):
         if not self.held_jobs:
             return
         job = self.held_jobs.pop(0)
-        printer = random.choice(["printer-1", "printer-2", "printer-3"])
+        printer = random.choice(PRINTERS)
         with self.client.post(
             f"/jobs/{job['jobId']}/release",
             json={"printerName": printer},
@@ -77,3 +79,70 @@ class PrintQueueUser(HttpUser):
     def list_jobs(self):
         """List jobs for this user."""
         self.client.get(f"/jobs?userId={self.user_id}", name="/jobs?userId=[id]")
+
+    @task(1)
+    def cancel_job(self):
+        """Cancel a held job and remove it from tracking lists."""
+        if not self.held_jobs:
+            return
+        job = self.held_jobs.pop(0)
+        with self.client.delete(
+            f"/jobs/{job['jobId']}",
+            name="/jobs/[id] (DELETE)",
+            catch_response=True,
+        ) as resp:
+            if resp.status_code == 200:
+                # Remove from all_jobs so we don't poll a cancelled job.
+                self.all_jobs = [j for j in self.all_jobs if j["jobId"] != job["jobId"]]
+            elif resp.status_code == 409:
+                # Already released — acceptable race condition.
+                resp.success()
+            else:
+                resp.failure(f"Cancel failed: {resp.status_code}")
+
+    @task(1)
+    def list_jobs_by_status(self):
+        """List jobs for this user filtered by a specific status."""
+        status = random.choice(["HELD", "RELEASED", "CANCELLED"])
+        self.client.get(
+            f"/jobs?userId={self.user_id}&status={status}",
+            name="/jobs?userId=[id]&status=[status]",
+        )
+
+    @task(1)
+    def health_check(self):
+        """Verify the health endpoint stays responsive under load."""
+        with self.client.get("/health", catch_response=True) as resp:
+            if resp.status_code != 200:
+                resp.failure(f"Health check failed: {resp.status_code}")
+
+    @task(1)
+    def poll_nonexistent_job(self):
+        """GET a job ID that doesn't exist — exercises the 404 path."""
+        fake_id = f"00000000-0000-0000-0000-{random.randint(0, 999999999999):012d}"
+        with self.client.get(
+            f"/jobs/{fake_id}",
+            name="/jobs/[nonexistent-id]",
+            catch_response=True,
+        ) as resp:
+            if resp.status_code == 404:
+                resp.success()
+            else:
+                resp.failure(f"Expected 404, got {resp.status_code}")
+
+    @task(1)
+    def release_with_invalid_printer(self):
+        """POST release with a bad printerName — exercises the 400 validation path."""
+        if not self.all_jobs:
+            return
+        job = random.choice(self.all_jobs)
+        with self.client.post(
+            f"/jobs/{job['jobId']}/release",
+            json={"printerName": "printer-invalid"},
+            name="/jobs/[id]/release (bad printer)",
+            catch_response=True,
+        ) as resp:
+            if resp.status_code == 400:
+                resp.success()
+            else:
+                resp.failure(f"Expected 400, got {resp.status_code}")
