@@ -2,7 +2,9 @@
 
 A distributed print job management system built on AWS, demonstrating release-at-device workflows, optimistic concurrency control, and message-driven processing.
 
-**Team:** Anand Mohan Singh, Vaibhav Thalanki, Pranav Viswanathan 
+**Team:** Anand Mohan Singh, Vaibhav Thalanki, Pranav Viswanathan
+
+**Introduction Video:** [CampusPrint_Introduction_CS6650.mp4](public/CampusPrint_Introduction_CS6650.mp4)
 
 ## Architecture
 
@@ -186,6 +188,34 @@ make exp2-contention  # Concurrent release race
 make exp3-saturation  # Overload one printer
 make exp4-fault       # Kill task, verify recovery
 ```
+
+## Load Test Results
+
+Locust load test with **50 concurrent users** over **60 seconds** — 1,484 requests, **0% failure rate**, ~25 req/s sustained throughput.
+
+![Load Test Summary](public/diagrams/locust-summary.png)
+
+**Throughput over time** — RPS ramp-up as users join, stabilizing at ~23 req/s:
+
+![RPS Over Time](public/diagrams/locust-rps-over-time.png)
+
+**Response time percentiles** — p50 settles at ~110ms, p99 under 470ms:
+
+![Response Times](public/diagrams/locust-response-times.png)
+
+**Per-endpoint latency breakdown** — POST /jobs is the heaviest (S3 upload), GET endpoints consistently fast:
+
+![Endpoint Latency](public/diagrams/locust-endpoint-latency.png)
+
+## CloudWatch Monitoring
+
+Real-time CloudWatch metrics captured during load test execution:
+
+![CloudWatch Dashboard](public/diagrams/cloudwatch-dashboard.png)
+
+**API log analysis** — endpoint distribution, HTTP status codes, and latency histogram parsed from CloudWatch Logs:
+
+![CloudWatch Logs Analysis](public/diagrams/cloudwatch-logs-analysis.png)
 
 ## Known Limitations
 
