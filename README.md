@@ -2,7 +2,7 @@
 
 A distributed print job management system built on AWS, demonstrating release-at-device workflows, optimistic concurrency control, and message-driven processing.
 
-**Team:** Pranav Viswanathan, Anand Mohan Singh, Vaibhav Thalanki
+**Team:** Anand Mohan Singh, Vaibhav Thalanki, Pranav Viswanathan 
 
 ## Architecture
 

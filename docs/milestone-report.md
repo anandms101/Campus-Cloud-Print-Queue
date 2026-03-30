@@ -1,6 +1,6 @@
 # Campus Cloud Print Queue — Milestone 1 Report
 
-**Team:** Pranav Viswanathan, Anand Mohan Singh, Vaibhav Thalanki (Northeastern University)
+**Team:** Anand Mohan Singh, Vaibhav Thalanki, Pranav Viswanathan (Northeastern University)
 **Course:** CS 6650 — Building Scalable Distributed Systems | **Date:** March 27, 2026
 **Repository:** https://github.com/anandms101/Campus-Cloud-Print-Queue
 
