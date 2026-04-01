@@ -6,7 +6,8 @@ ECR_BASE := $(AWS_ACCOUNT_ID).dkr.ecr.$(AWS_REGION).amazonaws.com
 .PHONY: help infra-init infra-plan infra-apply infra-destroy ecr-login \
         build-api build-worker push-api push-worker push-all \
         deploy deploy-fresh teardown \
-        test-health test-upload test-e2e alb-url status logs-api logs-printer
+        test-health test-upload test-e2e alb-url status logs-api logs-printer \
+        go-test go-vet go-build
 
 help: ## Show this help
 	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) | sort | awk 'BEGIN {FS = ":.*?## "}; {printf "\033[36m%-20s\033[0m %s\n", $$1, $$2}'
@@ -33,8 +34,8 @@ infra-output: ## Show Terraform outputs
 ecr-login: ## Login to ECR
 	aws ecr get-login-password --region $(AWS_REGION) | docker login --username AWS --password-stdin $(ECR_BASE)
 
-build-api: ## Build API Docker image
-	docker build --platform linux/amd64 -t $(PROJECT)-api services/api/
+build-api: ## Build API Docker image (Go/Gin)
+	docker build --platform linux/amd64 -t $(PROJECT)-api services/api-gin/
 
 build-worker: ## Build printer worker Docker image
 	docker build --platform linux/amd64 -t $(PROJECT)-worker services/printer-worker/
@@ -145,6 +146,17 @@ test-e2e: ## Full E2E test: upload -> release -> wait -> verify DONE
 	sleep 20 && \
 	echo "4. Final status:" && \
 	curl -s "http://$$ALB/jobs/$$JOB_ID" | python3 -m json.tool
+
+# ==================== Go API Development ====================
+
+go-test: ## Run Go API unit tests with race detector
+	cd services/api-gin && go test -v -race -cover ./...
+
+go-vet: ## Run Go vet on API code
+	cd services/api-gin && go vet ./...
+
+go-build: ## Build Go API binary locally
+	cd services/api-gin && go build -o bin/api-gin ./...
 
 # ==================== Experiments ====================
 

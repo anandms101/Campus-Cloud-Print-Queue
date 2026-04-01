@@ -2,7 +2,7 @@ sequenceDiagram
     autonumber
     participant C as Student Client
     participant ALB as ALB<br/>(HTTP :80)
-    participant API as FastAPI Service<br/>(ECS Fargate x2)
+    participant API as Go Gin API<br/>(ECS Fargate x2)
     participant DDB as DynamoDB<br/>(campus-print-jobs)
     participant S3 as S3 Bucket<br/>(campus-print-docs)
     participant SQS as SQS Queue<br/>(per-printer)

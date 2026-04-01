@@ -42,8 +42,8 @@ graph TB
 
             subgraph API_SVC["<b>API Service</b> &mdash; Desired: 2 tasks"]
                 direction LR
-                API1["<b>API Task 1</b><br/>FastAPI + Uvicorn<br/>0.25 vCPU / 512 MiB"]:::ecs
-                API2["<b>API Task 2</b><br/>FastAPI + Uvicorn<br/>0.25 vCPU / 512 MiB"]:::ecs
+                API1["<b>API Task 1</b><br/>Go Gin<br/>0.25 vCPU / 512 MiB"]:::ecs
+                API2["<b>API Task 2</b><br/>Go Gin<br/>0.25 vCPU / 512 MiB"]:::ecs
             end
 
             subgraph PRINTER_SVC["<b>Printer Worker Services</b> &mdash; 1 task each (fixed capacity)"]

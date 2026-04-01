@@ -1,12 +1,14 @@
 package main
 
 import (
-	"encoding/json"
-	"log"
+	"context"
+	"net/http"
 	"time"
 
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
+	"go.uber.org/zap"
+	"golang.org/x/time/rate"
 )
 
 // requestIDMiddleware generates a UUID for every request, stores it in the
@@ -20,27 +22,45 @@ func requestIDMiddleware() gin.HandlerFunc {
 	}
 }
 
-// jsonAccessLogger logs a structured JSON access-log line after each request,
-// mirroring the fields emitted by the Python API's RequestIdMiddleware.
-func jsonAccessLogger() gin.HandlerFunc {
+// jsonAccessLogger logs a structured JSON access-log line after each request
+// using the zap logger for consistent structured output.
+func jsonAccessLogger(logger *zap.Logger) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		start := time.Now()
 		c.Next()
 
 		requestID, _ := c.Get("request_id")
-		entry := map[string]interface{}{
-			"timestamp":   start.UTC().Format(time.RFC3339Nano),
-			"method":      c.Request.Method,
-			"path":        c.Request.URL.Path,
-			"status":      c.Writer.Status(),
-			"duration_ms": float64(time.Since(start).Nanoseconds()) / 1e6,
-			"request_id":  requestID,
-		}
-		data, err := json.Marshal(entry)
-		if err != nil {
-			log.Printf("access log marshal error: %v", err)
+		logger.Info("request completed",
+			zap.String("method", c.Request.Method),
+			zap.String("path", c.Request.URL.Path),
+			zap.Int("status", c.Writer.Status()),
+			zap.Float64("duration_ms", float64(time.Since(start).Nanoseconds())/1e6),
+			zap.Any("request_id", requestID),
+		)
+	}
+}
+
+// timeoutMiddleware applies a context deadline to each request so handlers
+// that call AWS services cannot hang indefinitely.
+func timeoutMiddleware(timeout time.Duration) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		ctx, cancel := context.WithTimeout(c.Request.Context(), timeout)
+		defer cancel()
+		c.Request = c.Request.WithContext(ctx)
+		c.Next()
+	}
+}
+
+// rateLimitMiddleware uses a token-bucket rate limiter (golang.org/x/time/rate).
+// Requests that exceed the limit receive HTTP 429.
+func rateLimitMiddleware(limiter *rate.Limiter) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		if !limiter.Allow() {
+			c.AbortWithStatusJSON(http.StatusTooManyRequests, gin.H{
+				"detail": "rate limit exceeded, please try again later",
+			})
 			return
 		}
-		log.Println(string(data))
+		c.Next()
 	}
 }
