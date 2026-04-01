@@ -41,13 +41,22 @@ func jsonAccessLogger(logger *zap.Logger) gin.HandlerFunc {
 }
 
 // timeoutMiddleware applies a context deadline to each request so handlers
-// that call AWS services cannot hang indefinitely.
+// that call AWS services cannot hang indefinitely. If the deadline is
+// exceeded and no response body has been written yet, it returns HTTP 504.
 func timeoutMiddleware(timeout time.Duration) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		ctx, cancel := context.WithTimeout(c.Request.Context(), timeout)
 		defer cancel()
 		c.Request = c.Request.WithContext(ctx)
 		c.Next()
+
+		// If the context deadline was exceeded and the handler hasn't
+		// written a response yet, return a clear 504 Gateway Timeout.
+		if ctx.Err() == context.DeadlineExceeded && !c.Writer.Written() {
+			c.AbortWithStatusJSON(http.StatusGatewayTimeout, gin.H{
+				"detail": "request timed out",
+			})
+		}
 	}
 }
 

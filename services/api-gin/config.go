@@ -45,14 +45,13 @@ func LoadConfig() (Config, error) {
 		}
 	}
 
-	if len(cfg.SQSQueueURLs) == 0 {
-		cfg.ValidPrinters = []string{"printer-1", "printer-2", "printer-3"}
-	} else {
-		for printer := range cfg.SQSQueueURLs {
-			cfg.ValidPrinters = append(cfg.ValidPrinters, printer)
-		}
-		sort.Strings(cfg.ValidPrinters) // deterministic order for error messages
+	// ValidPrinters is derived exclusively from SQSQueueURLs. If no queue URLs
+	// are configured, the list is empty and release requests will be rejected
+	// with a clear "Invalid printer" error — making misconfiguration obvious.
+	for printer := range cfg.SQSQueueURLs {
+		cfg.ValidPrinters = append(cfg.ValidPrinters, printer)
 	}
+	sort.Strings(cfg.ValidPrinters) // deterministic order for error messages
 
 	return cfg, nil
 }

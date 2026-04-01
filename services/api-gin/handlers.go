@@ -144,23 +144,26 @@ func (a *App) healthReadyHandler(c *gin.Context) {
 		checks["s3"] = "healthy"
 	}
 
-	// SQS — ensure at least one queue is configured, then probe the first queue
+	// SQS — ensure at least one queue is configured, then probe all queues
 	if len(a.config.SQSQueueURLs) == 0 {
 		checks["sqs"] = "unhealthy"
 		healthy = false
 	} else {
+		sqsHealthy := true
 		for _, url := range a.config.SQSQueueURLs {
 			_, err = a.sqsClient.GetQueueAttributes(ctx, &sqs.GetQueueAttributesInput{
 				QueueUrl:       aws.String(url),
 				AttributeNames: []sqstypes.QueueAttributeName{"ApproximateNumberOfMessages"},
 			})
 			if err != nil {
-				checks["sqs"] = "unhealthy"
-				healthy = false
-			} else {
-				checks["sqs"] = "healthy"
+				sqsHealthy = false
 			}
-			break
+		}
+		if sqsHealthy {
+			checks["sqs"] = "healthy"
+		} else {
+			checks["sqs"] = "unhealthy"
+			healthy = false
 		}
 	}
 
@@ -440,12 +443,6 @@ func (a *App) releaseJobHandler(c *gin.Context) {
 			},
 			ReturnValues: dbtypes.ReturnValueAllNew,
 		})
-		// Don't count ConditionalCheckFailedException as a breaker failure —
-		// it's expected business logic, not an infrastructure problem.
-		var cce *dbtypes.ConditionalCheckFailedException
-		if errors.As(err, &cce) {
-			return nil, err
-		}
 		return nil, err
 	})
 	if cbErr != nil {
