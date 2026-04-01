@@ -109,7 +109,8 @@ The cluster `campus-print-cluster` runs 5 Fargate tasks across 4 services:
 **Middleware:** Every request gets a UUID `X-Request-ID` header. All requests are logged as structured JSON via `go.uber.org/zap`: method, path, status code, duration, request ID. CORS headers are set for all origins.
 
 **Hardening:**
-- Uploads are capped at 50 MB (configurable via `MAX_UPLOAD_BYTES`). Requests exceeding this return HTTP 413.
+- Uploads are capped at 50 MB (configurable via `MAX_UPLOAD_BYTES`, must be > 0). Requests exceeding this return HTTP 413.
+- Valid printers are derived exclusively from `SQS_QUEUE_URLS` (JSON map). If the env var is missing or empty, no printers are valid and all release requests return HTTP 400 — making misconfiguration immediately obvious.
 - Filenames are sanitized with `filepath.Base()` to prevent path traversal in S3 keys.
 - If DynamoDB write fails after S3 upload, the orphaned S3 object is cleaned up (best-effort).
 - If SQS enqueue fails after DynamoDB marks a job RELEASED, the API rolls back to HELD using a compensating conditional update with `context.Background()` so it completes even if the HTTP request context is cancelled.
@@ -117,10 +118,10 @@ The cluster `campus-print-cluster` runs 5 Fargate tasks across 4 services:
 
 **Resilience Patterns:**
 - **Bulkhead** — Channel-based semaphore limits concurrent uploads to 4. The 5th concurrent upload immediately receives HTTP 429 instead of consuming resources.
-- **Circuit Breaker** — Every AWS call (DynamoDB GetItem/PutItem/UpdateItem/Query, S3 PutObject, SQS SendMessage) is wrapped in a `sony/gobreaker` circuit breaker. After 5 consecutive failures the circuit opens for 15 seconds, failing fast with HTTP 503 instead of waiting for timeouts. Both `ErrOpenState` and `ErrTooManyRequests` (half-open capacity) return 503. After 15 seconds, 3 probe requests test recovery.
+- **Circuit Breaker** — Every AWS call (DynamoDB GetItem/PutItem/UpdateItem/Query, S3 PutObject, SQS SendMessage) is wrapped in a `sony/gobreaker` circuit breaker. After 5 consecutive failures the circuit opens for 15 seconds, failing fast with HTTP 503 instead of waiting for timeouts. Both `ErrOpenState` and `ErrTooManyRequests` (half-open capacity) return 503. After 15 seconds, 3 probe requests test recovery. DynamoDB `ConditionalCheckFailedException` (HTTP 409 business logic) is excluded from failure counts via `IsSuccessful` so normal conflict traffic does not trip the breaker.
 - **Rate Limiting** — Global token-bucket rate limiter (`golang.org/x/time/rate`) at 100 req/s with burst of 20. Excess requests receive HTTP 429.
 - **Graceful Shutdown** — The API listens for `SIGTERM`/`SIGINT` and drains in-flight requests for up to 30 seconds before exiting. HTTP server has `ReadTimeout: 30s`, `WriteTimeout: 60s`, `IdleTimeout: 120s`.
-- **Request Timeouts** — Per-route context deadlines (not global, to avoid child-context capping). Default 30 seconds for reads, 60 seconds for uploads, 5 seconds for deep health checks.
+- **Request Timeouts** — Per-route context deadlines (not global, to avoid child-context capping). Default 30 seconds for reads, 60 seconds for uploads, 5 seconds for deep health checks. Returns HTTP 504 Gateway Timeout if the deadline is exceeded before a response is written.
 - **Panic Recovery** — `gin.Recovery()` middleware catches panics and returns HTTP 500 instead of crashing the process.
 - **Structured Logging** — All log output uses `go.uber.org/zap` for consistent JSON-formatted logs with request IDs, job IDs, and error details.
 
