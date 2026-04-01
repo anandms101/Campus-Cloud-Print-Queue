@@ -30,7 +30,7 @@ The system is deployed on **AWS** using exclusively managed services — no EC2 
 | Layer | Technology | Why |
 |-------|-----------|-----|
 | Compute | ECS Fargate | Serverless containers — no instance management, pay-per-second |
-| API Framework | Python FastAPI + Uvicorn (default), Go Gin (alternative) | Async I/O for concurrent AWS SDK calls |
+| API Framework | Go Gin | Goroutine-based concurrency, bulkhead pattern, circuit breakers, ~15 MB Docker image |
 | Database | DynamoDB (on-demand) | Single-digit-ms reads, conditional expressions for concurrency control |
 | Object Storage | S3 | Durable document storage with automatic lifecycle expiry |
 | Message Queue | SQS (Standard) | At-least-once delivery, long polling, dead-letter queues |
@@ -90,11 +90,11 @@ The cluster `campus-print-cluster` runs 5 Fargate tasks across 4 services:
 | `campus-print-printer-2` | 1 | 0.25 vCPU | 512 MiB | No | Fixed (desired=1) |
 | `campus-print-printer-3` | 1 | 0.25 vCPU | 512 MiB | No | Fixed (desired=1) |
 
-**API Service** — Stateless REST API (Python FastAPI on Uvicorn). All state lives in DynamoDB and S3. Two tasks load-balanced by the ALB. Health check grace period: 60s.
+**API Service** — Stateless REST API (Go Gin). All state lives in DynamoDB and S3. Two tasks load-balanced by the ALB. Health check grace period: 60s.
 
 **Printer Services** — Each printer is a standalone ECS service with `desired_count = 1`. Printers are intentionally **not auto-scaled** because they model physical devices with fixed capacity. If a task crashes, ECS automatically launches a replacement. Printer tasks have no load balancer — they only communicate outbound to SQS, S3, and DynamoDB.
 
-### 2.4 API Service (FastAPI)
+### 2.4 API Service (Go Gin)
 
 | Endpoint | Method | Operation | State Change |
 |----------|--------|-----------|-------------|
@@ -103,17 +103,27 @@ The cluster `campus-print-cluster` runs 5 Fargate tasks across 4 services:
 | `/jobs?userId=X` | GET | Query GSI `userId-createdAt-index`, optional status filter | (none) |
 | `/jobs/{id}/release` | POST | Conditional update `HELD→RELEASED`, enqueue to printer's SQS queue | `HELD` → `RELEASED` |
 | `/jobs/{id}` | DELETE | Conditional update `HELD→CANCELLED`, delete S3 object | `HELD` → `CANCELLED` |
-| `/health` | GET | Return `{"status": "healthy"}` | (none) |
+| `/health` | GET | Lightweight health check (always 200, used by ALB) | (none) |
+| `/health/ready` | GET | Deep check — pings DynamoDB, S3, SQS; returns 503 if any dependency is down | (none) |
 
-**Middleware:** Every request gets a UUID `X-Request-ID` header. All requests are logged as structured JSON: method, path, status code, duration, request ID.
+**Middleware:** Every request gets a UUID `X-Request-ID` header. All requests are logged as structured JSON via `go.uber.org/zap`: method, path, status code, duration, request ID. CORS headers are set for all origins.
 
 **Hardening:**
-- Uploads are capped at 50 MB (configurable via `MAX_UPLOAD_BYTES`). Requests exceeding this return HTTP 413.
-- Filenames are sanitized with `os.path.basename()` / `filepath.Base()` to prevent path traversal in S3 keys.
+- Uploads are capped at 50 MB (configurable via `MAX_UPLOAD_BYTES`, must be > 0). Requests exceeding this return HTTP 413.
+- Valid printers are derived exclusively from `SQS_QUEUE_URLS` (JSON map). If the env var is missing or empty, no printers are valid and all release requests return HTTP 400 — making misconfiguration immediately obvious.
+- Filenames are sanitized with `filepath.Base()` to prevent path traversal in S3 keys.
 - If DynamoDB write fails after S3 upload, the orphaned S3 object is cleaned up (best-effort).
-- If SQS enqueue fails after DynamoDB marks a job RELEASED, the API rolls back to HELD using a compensating conditional update. The Go API uses `context.Background()` for the rollback so it completes even if the HTTP request context is cancelled.
-- The Go API limits concurrent uploads to 4 via a channel-based semaphore (bulkhead pattern).
-- Docker containers run as a non-root user (`appuser`).
+- If SQS enqueue fails after DynamoDB marks a job RELEASED, the API rolls back to HELD using a compensating conditional update with `context.Background()` so it completes even if the HTTP request context is cancelled.
+- Docker containers run as a non-root user (multi-stage alpine build, ~15 MB image).
+
+**Resilience Patterns:**
+- **Bulkhead** — Channel-based semaphore limits concurrent uploads to 4. The 5th concurrent upload immediately receives HTTP 429 instead of consuming resources.
+- **Circuit Breaker** — Every AWS call (DynamoDB GetItem/PutItem/UpdateItem/Query, S3 PutObject, SQS SendMessage) is wrapped in a `sony/gobreaker` circuit breaker. After 5 consecutive failures the circuit opens for 15 seconds, failing fast with HTTP 503 instead of waiting for timeouts. Both `ErrOpenState` and `ErrTooManyRequests` (half-open capacity) return 503. After 15 seconds, 3 probe requests test recovery. DynamoDB `ConditionalCheckFailedException` (HTTP 409 business logic) is excluded from failure counts via `IsSuccessful` so normal conflict traffic does not trip the breaker.
+- **Rate Limiting** — Global token-bucket rate limiter (`golang.org/x/time/rate`) at 100 req/s with burst of 20. Excess requests receive HTTP 429.
+- **Graceful Shutdown** — The API listens for `SIGTERM`/`SIGINT` and drains in-flight requests for up to 30 seconds before exiting. HTTP server has `ReadTimeout: 30s`, `WriteTimeout: 60s`, `IdleTimeout: 120s`.
+- **Request Timeouts** — Per-route context deadlines (not global, to avoid child-context capping). Default 30 seconds for reads, 60 seconds for uploads, 5 seconds for deep health checks. Returns HTTP 504 Gateway Timeout if the deadline is exceeded before a response is written.
+- **Panic Recovery** — `gin.Recovery()` middleware catches panics and returns HTTP 500 instead of crashing the process.
+- **Structured Logging** — All log output uses `go.uber.org/zap` for consistent JSON-formatted logs with request IDs, job IDs, and error details.
 
 ### 2.5 Printer Worker
 
@@ -156,15 +166,24 @@ This was validated by Experiment 4 (fault injection): after killing a printer ta
 **Billing:** PAY_PER_REQUEST (on-demand). Free tier covers 25 WCU / 25 RCU.
 
 **Conditional expression example (release):**
-```python
-table.update_item(
-    Key={"jobId": job_id},
-    UpdateExpression="SET #s = :released, printerName = :printer, version = version + :one",
-    ConditionExpression="#s = :held",
-    ExpressionAttributeValues={":released": "RELEASED", ":held": "HELD", ":printer": "printer-1", ":one": 1}
-)
+```go
+dynamo.UpdateItem(ctx, &dynamodb.UpdateItemInput{
+    TableName: aws.String("campus-print-jobs"),
+    Key: map[string]types.AttributeValue{
+        "jobId": &types.AttributeValueMemberS{Value: jobID},
+    },
+    UpdateExpression:    aws.String("SET #s = :released, printerName = :printer, version = version + :inc"),
+    ConditionExpression: aws.String("#s = :held"),
+    ExpressionAttributeNames:  map[string]string{"#s": "status"},
+    ExpressionAttributeValues: map[string]types.AttributeValue{
+        ":released": &types.AttributeValueMemberS{Value: "RELEASED"},
+        ":held":     &types.AttributeValueMemberS{Value: "HELD"},
+        ":printer":  &types.AttributeValueMemberS{Value: "printer-1"},
+        ":inc":      &types.AttributeValueMemberN{Value: "1"},
+    },
+})
 ```
-If the job is not in HELD state, DynamoDB rejects with `ConditionalCheckFailedException` → API returns HTTP 409 Conflict.
+If the job is not in HELD state, DynamoDB rejects with `ConditionalCheckFailedException` (caught via `errors.As`) → API returns HTTP 409 Conflict.
 
 ### 2.7 S3
 
@@ -474,17 +493,19 @@ make test-e2e        # Upload → release → wait → verify DONE
 
 ### 7.1 Unit Tests
 
-The project has 29 unit tests using **pytest** and **moto** (AWS service mocks) that run without real AWS credentials:
+The project has **35 unit tests** across Go and Python:
 
-**API tests** (`tests/unit/test_api.py` — 19 tests):
-- Health endpoint returns 200
-- Job creation (success, missing fields, file too large, filename sanitization)
-- Job retrieval (success, not found)
-- Job listing (by user, with status filter, missing userId)
-- Release flow (success, invalid printer, missing printer name, not found, double-release 409)
-- Cancel flow (success, not found, already-released 409)
+**Go API tests** (`services/api-gin/handlers_test.go` — 25 tests, interface-based mocks):
+- Health endpoints (`/health` returns 200, `/health/ready` returns 200 or 503 when dependencies are down)
+- Job creation (success, missing userId, missing file, file too large 413, filename path-traversal sanitization)
+- Job retrieval (success, not found 404)
+- Job listing (by user, with status filter, missing userId 400)
+- Release flow (success with SQS enqueue, invalid printer 400, not found 404, conflict 409)
+- Cancel flow (success with S3 cleanup, not found 404, conflict 409)
+- Resilience: bulkhead rejects 5th concurrent upload (429), circuit breaker opens after 5 consecutive S3 failures (503), DynamoDB failure triggers S3 orphan cleanup, SQS failure triggers compensating rollback (RELEASED back to HELD)
+- Rate limiter: requests pass under normal load
 
-**Worker tests** (`tests/unit/test_worker.py` — 10 tests):
+**Worker tests** (`tests/unit/test_worker.py` — 10 tests, moto-mocked AWS):
 - Normal RELEASED → PROCESSING → DONE flow
 - Idempotency: already-DONE job is a no-op
 - S3 download failure transitions to FAILED
@@ -493,9 +514,12 @@ The project has 29 unit tests using **pytest** and **moto** (AWS service mocks) 
 - `mark_processing`, `mark_done`, `mark_failed` conditional update logic
 
 ```bash
-# Run all unit tests
+# Run Go API tests (with race detector)
+cd services/api-gin && go test -v -race -cover ./...
+
+# Run worker tests
 pip install -r requirements-dev.txt
-pytest tests/unit/ -v
+pytest tests/unit/test_worker.py -v
 ```
 
 ### 7.2 Experiment Tests
@@ -515,10 +539,10 @@ GitHub Actions (`.github/workflows/ci.yml`) runs on every push and PR to `main`:
 
 | Job | What it checks |
 |-----|----------------|
-| `python-checks` | Compile check, 29 unit tests with moto |
-| `go-checks` | `go vet` and `go build` for the Gin API |
+| `api-checks` | `go vet`, `go build`, 25 unit tests with race detector for the Go Gin API |
+| `python-checks` | Worker compile check, 10 worker unit tests with moto |
 | `terraform-checks` | `terraform fmt -check`, `terraform init`, `terraform validate` |
-| `docker-build` | Docker build for all 3 images (API, worker, Go API) |
+| `docker-build` | Docker build for API (Go) and worker (Python) images |
 
 ### 7.4 Load Test Results (Experiment 1)
 
@@ -564,8 +588,8 @@ GitHub Actions (`.github/workflows/ci.yml`) runs on every push and PR to `main`:
 
 | Endpoint | p50 | p95 | p99 | Avg | Observations |
 |----------|-----|-----|-----|-----|-------------|
-| `GET /health` | 82 ms | 170 ms | 220 ms | 104 ms | Baseline ALB round-trip. No I/O — measures pure network + Uvicorn overhead. |
-| `POST /jobs` | 140 ms | 360 ms | 450 ms | 167 ms | Heaviest endpoint. Includes S3 `put_object` (multipart upload of README.md ~7KB). The 2.6x spread between p50 and p99 reflects S3 upload variance. |
+| `GET /health` | 82 ms | 170 ms | 220 ms | 104 ms | Baseline ALB round-trip. No I/O — measures pure network + Gin overhead. |
+| `POST /jobs` | 140 ms | 360 ms | 450 ms | 167 ms | Heaviest endpoint. Includes S3 `PutObject` (streaming upload of README.md ~7KB). The 2.6x spread between p50 and p99 reflects S3 upload variance. |
 | `GET /jobs/[id]` | 85 ms | 170 ms | 200 ms | 104 ms | Single DynamoDB `get_item` by primary key. Consistent sub-200ms. |
 | `DELETE /jobs/[id]` | 120 ms | 240 ms | 280 ms | 146 ms | DynamoDB conditional delete + S3 `delete_object`. The 603ms max (only outlier in the entire test) was a single slow S3 delete. |
 | `POST /jobs/[id]/release` | 100 ms | 240 ms | 310 ms | 129 ms | DynamoDB conditional update + SQS `send_message`. Slightly heavier than reads due to two AWS service calls. |
@@ -594,8 +618,8 @@ CloudWatch metrics were captured live during the 60-second load test. The dashbo
 |-------|------------|
 | **ALB Request Count** | Peaks at ~800 requests/minute during the load test, then drops to baseline health-check traffic (~2 req/min). The sharp ramp-up and plateau aligns with Locust's user injection curve. |
 | **ALB Target Response Time** | Average response time peaks at ~85ms during the burst phase, then decreases as the request mix shifts from upload-heavy (initial seed jobs) to poll-heavy (steady state). This confirms the latency is dominated by `POST /jobs`, not infrastructure overhead. |
-| **ECS API CPU Utilization** | CPU peaks at ~4.5% across the 2 API tasks (0.25 vCPU each). At 50 concurrent users, the API is far from CPU-bound — Uvicorn's async I/O model means most time is spent waiting on AWS SDK calls, not computing. This suggests the system could handle 10–20x more users before CPU becomes a bottleneck. |
-| **ECS API Memory Utilization** | Memory holds steady at ~11–12% of 512 MiB (~56–61 MiB). No growth trend during the test, confirming no memory leaks under sustained load. The flat profile is expected — FastAPI + Uvicorn have minimal per-request memory overhead. |
+| **ECS API CPU Utilization** | CPU peaks at ~4.5% across the 2 API tasks (0.25 vCPU each). At 50 concurrent users, the API is far from CPU-bound — Go's goroutine model means most time is spent waiting on AWS SDK calls, not computing. This suggests the system could handle 10–20x more users before CPU becomes a bottleneck. |
+| **ECS API Memory Utilization** | Memory holds steady at ~11–12% of 512 MiB (~56–61 MiB). No growth trend during the test, confirming no memory leaks under sustained load. The flat profile is expected — Go Gin has minimal per-request memory overhead. |
 | **SQS Queue Depth** | All three printer queues show message accumulation during the test (printer-2 peaks at ~12 messages, printer-1 and printer-3 at ~3–5). Messages drain after the test as printer workers process them. The uneven distribution reflects the random printer selection in the Locust release task. |
 | **HTTP Status Codes** | 2xx responses dominate (~800 during peak), with 4xx responses (~100) coming from intentional error-path tasks (bad printer name, nonexistent job ID, double-release attempts). Zero 5xx errors — the API never returned a server error during the test. |
 

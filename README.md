@@ -21,7 +21,8 @@ A distributed print job management system built on AWS, demonstrating release-at
 - **AWS CLI** configured (`aws sts get-caller-identity` should work)
 - **Terraform** >= 1.0 (`brew install terraform`)
 - **Docker** running (`docker info` should work)
-- **Python** 3.11+ (`python3 --version`)
+- **Go** 1.25+ (`go version`) — for API development/testing
+- **Python** 3.11+ (`python3 --version`) — for printer worker and experiment scripts
 - **Make** (pre-installed on macOS/Linux)
 
 ## Quick Start
@@ -69,6 +70,10 @@ make test-health      # Health check
 make test-upload      # Upload a test job
 make test-e2e         # Full E2E test
 
+make go-test          # Run Go API unit tests (with race detector)
+make go-vet           # Run Go vet on API code
+make go-build         # Build Go API binary locally
+
 make exp1-load        # Experiment 1: Locust load test
 make exp2-contention  # Experiment 2: DynamoDB contention
 make exp3-saturation  # Experiment 3: Printer saturation
@@ -79,14 +84,13 @@ make exp4-fault       # Experiment 4: Fault injection
 
 | Method | Path | Description |
 |--------|------|-------------|
-| `GET` | `/health` | Health check |
+| `GET` | `/health` | Health check (lightweight, for ALB) |
+| `GET` | `/health/ready` | Deep health check (verifies DynamoDB, S3, SQS connectivity) |
 | `POST` | `/jobs` | Upload a print job (multipart: `file` + `userId`, max 50 MB) |
 | `GET` | `/jobs/{id}` | Get job status |
 | `GET` | `/jobs?userId=X` | List user's jobs |
 | `POST` | `/jobs/{id}/release` | Release to printer (`{"printerName": "printer-1"}`) |
 | `DELETE` | `/jobs/{id}` | Cancel a held job |
-
-> **Interactive API docs:** When the API is running, visit `/docs` (Swagger UI) or `/redoc` for auto-generated interactive documentation.
 
 ### Example upload curl
 
@@ -107,8 +111,7 @@ curl -X POST http://<ALB_DNS>/jobs/<job-id>/release \
 ## Project Structure
 
 ```
-├── Makefile                # Build, deploy, test, teardown (Python API)
-├── Makefile.gin            # Alternative Makefile for Go/Gin API
+├── Makefile                # Build, deploy, test, teardown
 ├── infra/                  # Terraform (9 modules)
 │   └── modules/
 │       ├── networking/     # VPC, 2 public subnets, security groups
@@ -121,10 +124,10 @@ curl -X POST http://<ALB_DNS>/jobs/<job-id>/release \
 │       ├── ecs/            # Cluster + API (2) + printers (3x1)
 │       └── cloudwatch/     # Log groups + dashboard
 ├── services/
-│   ├── api/                # FastAPI REST service (Python — default)
-│   ├── api-gin/            # Gin REST service (Go — alternative)
+│   ├── api-gin/            # Go Gin REST service (primary API)
 │   └── printer-worker/     # SQS-polling processor (Python)
 ├── tests/
+│   ├── unit/                      # Python worker tests (Go API tests live in services/api-gin/)
 │   ├── experiment1_load_test/     # Locust load test
 │   ├── experiment2_contention/    # DynamoDB conditional write test
 │   ├── experiment3_saturation/    # Queue backpressure test
@@ -132,8 +135,6 @@ curl -X POST http://<ALB_DNS>/jobs/<job-id>/release \
 ├── scripts/                # Seed data, health checks
 └── docs/                   # Architecture doc, Mermaid sources, report
 ```
-
-> **Go API variant:** To deploy using the Go/Gin API instead of FastAPI, run `make -f Makefile.gin deploy-fresh`.
 
 ## Cost
 
@@ -150,33 +151,45 @@ Redeploy from scratch takes ~5 minutes.
 
 ## Key Design Decisions
 
-1. **Per-printer SQS queues** (not a global queue) — routes by user intent, avoids head-of-line blocking
-2. **Fixed-capacity workers** (desired count = 1) — models physical printers, enables saturation study
-3. **Optimistic concurrency** via DynamoDB conditional expressions — no distributed locks
-4. **Idempotent processing** — conditional state transitions + redelivery handling ensures exactly-once over at-least-once SQS
-5. **Public subnets only** (no NAT Gateway) — saves ~$33/month for a course project
-6. **Standard SQS** (not FIFO) — ordering not required, lower cost, higher throughput
+1. **Go Gin API** with resilience patterns — bulkhead (semaphore-limited uploads), circuit breakers (DynamoDB/S3/SQS), rate limiting, graceful shutdown
+2. **Per-printer SQS queues** (not a global queue) — routes by user intent, avoids head-of-line blocking
+3. **Fixed-capacity workers** (desired count = 1) — models physical printers, enables saturation study
+4. **Optimistic concurrency** via DynamoDB conditional expressions — no distributed locks
+5. **Idempotent processing** — conditional state transitions + redelivery handling ensures exactly-once over at-least-once SQS
+6. **Compensating transactions** — SQS send failure triggers rollback (RELEASED back to HELD)
+7. **Public subnets only** (no NAT Gateway) — saves ~$33/month for a course project
+8. **Standard SQS** (not FIFO) — ordering not required, lower cost, higher throughput
 
 ## Testing
 
 ### Unit tests
 
-29 unit tests run locally with mocked AWS (no credentials needed):
+**Go API tests** (25 tests, interface-based mocks, race detector enabled):
+
+```bash
+cd services/api-gin && go test -v -race -cover ./...
+# or from the repo root:
+make go-test
+```
+
+Tests cover all API endpoints (health, create, get, list, release, cancel), error paths (413, 404, 409), resilience patterns (bulkhead rejection, circuit breaker, compensating rollback), and S3 orphan cleanup.
+
+**Python worker tests** (moto-mocked AWS):
 
 ```bash
 pip install -r requirements-dev.txt
-pytest tests/unit/ -v
+pytest tests/unit/test_worker.py -v
 ```
 
-Tests cover the full API surface (upload, release, cancel, list, error cases) and the worker state machine (idempotency, redelivery, failure handling).
+Tests cover the worker state machine (idempotency, redelivery, failure handling).
 
 ### CI
 
 GitHub Actions runs on every push and PR to `main`:
-- Python compile + 29 unit tests (moto)
-- Go vet + build
+- Go vet + build + 25 unit tests (race detector)
+- Python worker compile + unit tests (moto)
 - Terraform fmt + validate
-- Docker build for all 3 images
+- Docker build for all images
 
 ### Experiment tests
 

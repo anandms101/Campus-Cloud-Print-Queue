@@ -10,9 +10,9 @@
 
 **Problem.** Campus printing is synchronous and error-prone. Students must physically walk to a printer, send a job, wait for it, and hope it works. If the device jams or runs out of paper, they start over. *Release-at-device printing* decouples submission from execution: students upload jobs from anywhere (held in the cloud), then release them at a specific printer when ready. No wasted trips, no lost prints, no queue confusion.
 
-**System.** We built a cloud-native implementation on AWS: a stateless FastAPI service on ECS/Fargate behind an ALB, DynamoDB for job state with conditional writes for concurrency control, S3 for document storage, and per-printer SQS queues driving fixed-capacity printer workers. The job state machine is: `HELD → RELEASED → PROCESSING → DONE`, with `CANCELLED` and `FAILED` as terminal states.
+**System.** We built a cloud-native implementation on AWS: a stateless Go Gin API service on ECS/Fargate behind an ALB, DynamoDB for job state with conditional writes for concurrency control, S3 for document storage, and per-printer SQS queues driving fixed-capacity printer workers. The job state machine is: `HELD → RELEASED → PROCESSING → DONE`, with `CANCELLED` and `FAILED` as terminal states.
 
-**Team.** Vaibhav Thalanki — API development (FastAPI and Go Gin with Bulkhead, 6 endpoints), DynamoDB schema design, conditional write logic. Pranav Viswanathan — Printer worker, experiment scripts (Locust, async Python), CloudWatch observability. Anand Mohan Singh — Infrastructure (Terraform, 9 modules), deployment pipeline, Makefile automation. 
+**Team.** Vaibhav Thalanki — API development (Go Gin with bulkhead, circuit breaker, and 7 endpoints), DynamoDB schema design, conditional write logic. Pranav Viswanathan — Printer worker, experiment scripts (Locust, async Python), CloudWatch observability. Anand Mohan Singh — Infrastructure (Terraform, 9 modules), deployment pipeline, Makefile automation.
 
 **Experiments.** We designed four experiments to validate distributed systems properties: (1) API load testing with Locust at 50–100 concurrent users, (2) DynamoDB contention testing with 2–50 concurrent conditional writes, (3) printer saturation with 50 jobs flooding a single printer, and (4) fault injection by killing a printer worker mid-processing.
 
@@ -36,7 +36,7 @@
 
 **Anand** built 9 Terraform modules (networking, ECR, IAM, DynamoDB, S3, SQS, ALB, ECS, CloudWatch) and a Makefile with 20+ targets including `deploy-fresh` (one-command full deploy), `teardown`, `status`, `queue-depth`, and per-experiment runners.
 
-**Vaibhav**  implemented the FastAPI and Go Gin application with 6 endpoints, designed the DynamoDB schema (PK: `jobId`, GSI: `userId-createdAt-index`, TTL on `expiresAt`), and wrote all conditional expression logic for state transitions. Also added Sam Newman's Bulkhead isolation for Gin implementation for POST /jobs endpoint.
+**Vaibhav** implemented the Go Gin API with 7 endpoints and resilience patterns (bulkhead, circuit breaker, rate limiting), designed the DynamoDB schema (PK: `jobId`, GSI: `userId-createdAt-index`, TTL on `expiresAt`), and wrote all conditional expression logic for state transitions.
 
 **Pranav** built the printer worker with SQS polling and idempotent redelivery handling, wrote all 4 experiment scripts, and configured CloudWatch log groups and the monitoring dashboard.
 

@@ -4,22 +4,38 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"sort"
+	"strconv"
 )
 
 type Config struct {
-	DynamoTable   string
-	S3Bucket      string
-	AWSRegion     string
-	SQSQueueURLs  map[string]string
-	ValidPrinters []string
+	DynamoTable    string
+	S3Bucket       string
+	AWSRegion      string
+	SQSQueueURLs   map[string]string
+	ValidPrinters  []string
+	MaxUploadBytes int64
 }
 
 func LoadConfig() (Config, error) {
+	maxUpload := int64(50 * 1024 * 1024) // 50 MB default
+	if raw := os.Getenv("MAX_UPLOAD_BYTES"); raw != "" {
+		parsed, err := strconv.ParseInt(raw, 10, 64)
+		if err != nil {
+			return Config{}, fmt.Errorf("invalid MAX_UPLOAD_BYTES: %w", err)
+		}
+		if parsed <= 0 {
+			return Config{}, fmt.Errorf("invalid MAX_UPLOAD_BYTES: must be > 0, got %d", parsed)
+		}
+		maxUpload = parsed
+	}
+
 	cfg := Config{
-		DynamoTable:  getenv("DYNAMODB_TABLE", "campus-print-jobs"),
-		S3Bucket:     getenv("S3_BUCKET", "campus-print-docs"),
-		AWSRegion:    getenv("AWS_DEFAULT_REGION", "us-west-2"),
-		SQSQueueURLs: make(map[string]string),
+		DynamoTable:    getenv("DYNAMODB_TABLE", "campus-print-jobs"),
+		S3Bucket:       getenv("S3_BUCKET", "campus-print-docs"),
+		AWSRegion:      getenv("AWS_DEFAULT_REGION", "us-west-2"),
+		SQSQueueURLs:   make(map[string]string),
+		MaxUploadBytes: maxUpload,
 	}
 
 	raw := os.Getenv("SQS_QUEUE_URLS")
@@ -29,13 +45,13 @@ func LoadConfig() (Config, error) {
 		}
 	}
 
-	if len(cfg.SQSQueueURLs) == 0 {
-		cfg.ValidPrinters = []string{"printer-1", "printer-2", "printer-3"}
-	} else {
-		for printer := range cfg.SQSQueueURLs {
-			cfg.ValidPrinters = append(cfg.ValidPrinters, printer)
-		}
+	// ValidPrinters is derived exclusively from SQSQueueURLs. If no queue URLs
+	// are configured, the list is empty and release requests will be rejected
+	// with a clear "Invalid printer" error — making misconfiguration obvious.
+	for printer := range cfg.SQSQueueURLs {
+		cfg.ValidPrinters = append(cfg.ValidPrinters, printer)
 	}
+	sort.Strings(cfg.ValidPrinters) // deterministic order for error messages
 
 	return cfg, nil
 }

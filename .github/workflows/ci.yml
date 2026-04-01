@@ -7,39 +7,7 @@ on:
     branches: [main]
 
 jobs:
-  python-checks:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-
-      - uses: actions/setup-python@v5
-        with:
-          python-version: "3.11"
-
-      - name: Install API dependencies
-        run: pip install -r services/api/requirements.txt
-
-      - name: Install worker dependencies
-        run: pip install -r services/printer-worker/requirements.txt
-
-      - name: Install test dependencies
-        run: pip install -r requirements-dev.txt
-
-      - name: Compile check — API
-        run: python -m py_compile services/api/app/main.py
-
-      - name: Compile check — Worker
-        run: python -m py_compile services/printer-worker/app/main.py
-
-      - name: Run unit tests
-        run: pytest tests/unit/ -v
-        env:
-          AWS_DEFAULT_REGION: us-west-2
-          DYNAMODB_TABLE: test-table
-          S3_BUCKET: test-bucket
-          SQS_QUEUE_URLS: "{}"
-
-  go-checks:
+  api-checks:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -55,6 +23,36 @@ jobs:
       - name: Go build
         working-directory: services/api-gin
         run: go build ./...
+
+      - name: Go test
+        working-directory: services/api-gin
+        run: go test -v -race -cover ./...
+
+  python-checks:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install worker dependencies
+        run: pip install -r services/printer-worker/requirements.txt
+
+      - name: Install test dependencies
+        run: pip install -r requirements-dev.txt
+
+      - name: Compile check — Worker
+        run: python -m py_compile services/printer-worker/app/main.py
+
+      - name: Run worker unit tests
+        run: pytest tests/unit/test_worker.py -v
+        env:
+          AWS_DEFAULT_REGION: us-west-2
+          DYNAMODB_TABLE: test-table
+          S3_BUCKET: test-bucket
+          SQS_QUEUE_URLS: "{}"
 
   terraform-checks:
     runs-on: ubuntu-latest
@@ -82,11 +80,8 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Build API image
-        run: docker build --platform linux/amd64 -t campus-print-api services/api/
+      - name: Build API image (Go/Gin)
+        run: docker build --platform linux/amd64 -t campus-print-api services/api-gin/
 
       - name: Build Worker image
         run: docker build --platform linux/amd64 -t campus-print-worker services/printer-worker/
-
-      - name: Build Go API image
-        run: docker build --platform linux/amd64 -t campus-print-api-gin services/api-gin/
