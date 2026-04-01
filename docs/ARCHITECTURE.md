@@ -117,10 +117,11 @@ The cluster `campus-print-cluster` runs 5 Fargate tasks across 4 services:
 
 **Resilience Patterns:**
 - **Bulkhead** — Channel-based semaphore limits concurrent uploads to 4. The 5th concurrent upload immediately receives HTTP 429 instead of consuming resources.
-- **Circuit Breaker** — Each AWS dependency (DynamoDB, S3, SQS) is wrapped in a `sony/gobreaker` circuit breaker. After 5 consecutive failures the circuit opens for 15 seconds, failing fast with HTTP 503 instead of waiting for timeouts. After 15 seconds, 3 probe requests are allowed to test recovery.
+- **Circuit Breaker** — Every AWS call (DynamoDB GetItem/PutItem/UpdateItem/Query, S3 PutObject, SQS SendMessage) is wrapped in a `sony/gobreaker` circuit breaker. After 5 consecutive failures the circuit opens for 15 seconds, failing fast with HTTP 503 instead of waiting for timeouts. Both `ErrOpenState` and `ErrTooManyRequests` (half-open capacity) return 503. After 15 seconds, 3 probe requests test recovery.
 - **Rate Limiting** — Global token-bucket rate limiter (`golang.org/x/time/rate`) at 100 req/s with burst of 20. Excess requests receive HTTP 429.
-- **Graceful Shutdown** — The API listens for `SIGTERM`/`SIGINT` and drains in-flight requests for up to 30 seconds before exiting.
-- **Request Timeouts** — All requests have a 30-second context deadline. Upload requests get 60 seconds to accommodate large file transfers.
+- **Graceful Shutdown** — The API listens for `SIGTERM`/`SIGINT` and drains in-flight requests for up to 30 seconds before exiting. HTTP server has `ReadTimeout: 30s`, `WriteTimeout: 60s`, `IdleTimeout: 120s`.
+- **Request Timeouts** — Per-route context deadlines (not global, to avoid child-context capping). Default 30 seconds for reads, 60 seconds for uploads, 5 seconds for deep health checks.
+- **Panic Recovery** — `gin.Recovery()` middleware catches panics and returns HTTP 500 instead of crashing the process.
 - **Structured Logging** — All log output uses `go.uber.org/zap` for consistent JSON-formatted logs with request IDs, job IDs, and error details.
 
 ### 2.5 Printer Worker

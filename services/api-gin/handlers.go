@@ -42,6 +42,12 @@ type App struct {
 
 var errNotFound = fmt.Errorf("not found")
 
+// isCircuitBreakerError returns true if the error is from an open or
+// half-open circuit breaker (ErrOpenState or ErrTooManyRequests).
+func isCircuitBreakerError(err error) bool {
+	return errors.Is(err, gobreaker.ErrOpenState) || errors.Is(err, gobreaker.ErrTooManyRequests)
+}
+
 // NewApp constructs the application with all middleware and routes.
 func NewApp(cfg Config, awsCfg aws.Config, logger *zap.Logger) *App {
 	dynamo, s3client, sqsclient := NewAWSClients(awsCfg)
@@ -53,6 +59,7 @@ func NewAppWithClients(cfg Config, dynamo DynamoAPI, s3client S3API, sqsclient S
 	r := gin.New()
 
 	// --- Middleware stack (order matters) ---
+	r.Use(gin.Recovery()) // panic recovery — returns 500 instead of crashing the process
 	r.Use(requestIDMiddleware())
 	r.Use(jsonAccessLogger(logger))
 	r.Use(cors.New(cors.Config{
@@ -65,9 +72,6 @@ func NewAppWithClients(cfg Config, dynamo DynamoAPI, s3client S3API, sqsclient S
 	// Global rate limiter: 100 requests/second, burst of 20.
 	limiter := rate.NewLimiter(rate.Limit(100), 20)
 	r.Use(rateLimitMiddleware(limiter))
-
-	// Default request timeout: 30 s.
-	r.Use(timeoutMiddleware(30 * time.Second))
 
 	app := &App{
 		config:          cfg,
@@ -83,14 +87,16 @@ func NewAppWithClients(cfg Config, dynamo DynamoAPI, s3client S3API, sqsclient S
 	}
 
 	// --- Routes ---
+	// Timeouts are applied per-route (not globally) to avoid child-context
+	// capping issues where a shorter global timeout would override a longer
+	// route-specific one.
 	r.GET("/health", app.healthHandler)
-	r.GET("/health/ready", app.healthReadyHandler)
-	// Upload gets a longer timeout (60 s) for large files.
+	r.GET("/health/ready", timeoutMiddleware(5*time.Second), app.healthReadyHandler)
 	r.POST("/jobs", timeoutMiddleware(60*time.Second), app.createJobHandler)
-	r.GET("/jobs", app.listJobsHandler)
-	r.GET("/jobs/:id", app.getJobHandler)
-	r.POST("/jobs/:id/release", app.releaseJobHandler)
-	r.DELETE("/jobs/:id", app.cancelJobHandler)
+	r.GET("/jobs", timeoutMiddleware(30*time.Second), app.listJobsHandler)
+	r.GET("/jobs/:id", timeoutMiddleware(30*time.Second), app.getJobHandler)
+	r.POST("/jobs/:id/release", timeoutMiddleware(30*time.Second), app.releaseJobHandler)
+	r.DELETE("/jobs/:id", timeoutMiddleware(30*time.Second), app.cancelJobHandler)
 
 	return app
 }
@@ -138,19 +144,24 @@ func (a *App) healthReadyHandler(c *gin.Context) {
 		checks["s3"] = "healthy"
 	}
 
-	// SQS — probe the first queue
-	for _, url := range a.config.SQSQueueURLs {
-		_, err = a.sqsClient.GetQueueAttributes(ctx, &sqs.GetQueueAttributesInput{
-			QueueUrl:       aws.String(url),
-			AttributeNames: []sqstypes.QueueAttributeName{"ApproximateNumberOfMessages"},
-		})
-		if err != nil {
-			checks["sqs"] = "unhealthy"
-			healthy = false
-		} else {
-			checks["sqs"] = "healthy"
+	// SQS — ensure at least one queue is configured, then probe the first queue
+	if len(a.config.SQSQueueURLs) == 0 {
+		checks["sqs"] = "unhealthy"
+		healthy = false
+	} else {
+		for _, url := range a.config.SQSQueueURLs {
+			_, err = a.sqsClient.GetQueueAttributes(ctx, &sqs.GetQueueAttributesInput{
+				QueueUrl:       aws.String(url),
+				AttributeNames: []sqstypes.QueueAttributeName{"ApproximateNumberOfMessages"},
+			})
+			if err != nil {
+				checks["sqs"] = "unhealthy"
+				healthy = false
+			} else {
+				checks["sqs"] = "healthy"
+			}
+			break
 		}
-		break
 	}
 
 	status := "healthy"
@@ -232,7 +243,7 @@ func (a *App) createJobHandler(c *gin.Context) {
 	})
 	if cbErr != nil {
 		a.logger.Error("failed to upload to S3", zap.Error(cbErr), zap.String("jobId", jobID))
-		if errors.Is(cbErr, gobreaker.ErrOpenState) {
+		if isCircuitBreakerError(cbErr) {
 			c.JSON(http.StatusServiceUnavailable, gin.H{"detail": "storage service temporarily unavailable"})
 			return
 		}
@@ -281,7 +292,7 @@ func (a *App) createJobHandler(c *gin.Context) {
 			a.logger.Error("failed to delete orphaned S3 object", zap.Error(delErr), zap.String("s3Key", s3Key))
 		}
 
-		if errors.Is(cbErr, gobreaker.ErrOpenState) {
+		if isCircuitBreakerError(cbErr) {
 			c.JSON(http.StatusServiceUnavailable, gin.H{"detail": "database service temporarily unavailable"})
 			return
 		}
@@ -334,17 +345,26 @@ func (a *App) listJobsHandler(c *gin.Context) {
 		return
 	}
 
-	resp, err := a.dynamo.Query(c.Request.Context(), &dynamodb.QueryInput{
-		TableName:                 aws.String(a.config.DynamoTable),
-		IndexName:                 aws.String("userId-createdAt-index"),
-		KeyConditionExpression:    expr.KeyCondition(),
-		FilterExpression:          expr.Filter(),
-		ExpressionAttributeNames:  expr.Names(),
-		ExpressionAttributeValues: expr.Values(),
-		ScanIndexForward:          aws.Bool(false),
+	var resp *dynamodb.QueryOutput
+	_, cbErr := a.dynamoBreaker.Execute(func() ([]byte, error) {
+		var err error
+		resp, err = a.dynamo.Query(c.Request.Context(), &dynamodb.QueryInput{
+			TableName:                 aws.String(a.config.DynamoTable),
+			IndexName:                 aws.String("userId-createdAt-index"),
+			KeyConditionExpression:    expr.KeyCondition(),
+			FilterExpression:          expr.Filter(),
+			ExpressionAttributeNames:  expr.Names(),
+			ExpressionAttributeValues: expr.Values(),
+			ScanIndexForward:          aws.Bool(false),
+		})
+		return nil, err
 	})
-	if err != nil {
-		a.logger.Error("failed to query DynamoDB", zap.Error(err))
+	if cbErr != nil {
+		a.logger.Error("failed to query DynamoDB", zap.Error(cbErr))
+		if isCircuitBreakerError(cbErr) {
+			c.JSON(http.StatusServiceUnavailable, gin.H{"detail": "database service temporarily unavailable"})
+			return
+		}
 		c.JSON(http.StatusInternalServerError, gin.H{"detail": "failed to query jobs"})
 		return
 	}
@@ -398,28 +418,39 @@ func (a *App) releaseJobHandler(c *gin.Context) {
 	}
 
 	updatedAt := time.Now().UTC().Format(time.RFC3339Nano)
-	resp, err := a.dynamo.UpdateItem(ctx, &dynamodb.UpdateItemInput{
-		TableName: aws.String(a.config.DynamoTable),
-		Key: map[string]dbtypes.AttributeValue{
-			"jobId": &dbtypes.AttributeValueMemberS{Value: jobID},
-		},
-		UpdateExpression:    aws.String("SET #s = :new_status, printerName = :printer, updatedAt = :now, version = version + :inc"),
-		ConditionExpression: aws.String("#s = :held"),
-		ExpressionAttributeNames: map[string]string{
-			"#s": "status",
-		},
-		ExpressionAttributeValues: map[string]dbtypes.AttributeValue{
-			":new_status": &dbtypes.AttributeValueMemberS{Value: "RELEASED"},
-			":printer":    &dbtypes.AttributeValueMemberS{Value: body.PrinterName},
-			":now":        &dbtypes.AttributeValueMemberS{Value: updatedAt},
-			":held":       &dbtypes.AttributeValueMemberS{Value: "HELD"},
-			":inc":        &dbtypes.AttributeValueMemberN{Value: "1"},
-		},
-		ReturnValues: dbtypes.ReturnValueAllNew,
-	})
-	if err != nil {
+	var releaseResp *dynamodb.UpdateItemOutput
+	_, cbErr := a.dynamoBreaker.Execute(func() ([]byte, error) {
+		var err error
+		releaseResp, err = a.dynamo.UpdateItem(ctx, &dynamodb.UpdateItemInput{
+			TableName: aws.String(a.config.DynamoTable),
+			Key: map[string]dbtypes.AttributeValue{
+				"jobId": &dbtypes.AttributeValueMemberS{Value: jobID},
+			},
+			UpdateExpression:    aws.String("SET #s = :new_status, printerName = :printer, updatedAt = :now, version = version + :inc"),
+			ConditionExpression: aws.String("#s = :held"),
+			ExpressionAttributeNames: map[string]string{
+				"#s": "status",
+			},
+			ExpressionAttributeValues: map[string]dbtypes.AttributeValue{
+				":new_status": &dbtypes.AttributeValueMemberS{Value: "RELEASED"},
+				":printer":    &dbtypes.AttributeValueMemberS{Value: body.PrinterName},
+				":now":        &dbtypes.AttributeValueMemberS{Value: updatedAt},
+				":held":       &dbtypes.AttributeValueMemberS{Value: "HELD"},
+				":inc":        &dbtypes.AttributeValueMemberN{Value: "1"},
+			},
+			ReturnValues: dbtypes.ReturnValueAllNew,
+		})
+		// Don't count ConditionalCheckFailedException as a breaker failure —
+		// it's expected business logic, not an infrastructure problem.
 		var cce *dbtypes.ConditionalCheckFailedException
 		if errors.As(err, &cce) {
+			return nil, err
+		}
+		return nil, err
+	})
+	if cbErr != nil {
+		var cce *dbtypes.ConditionalCheckFailedException
+		if errors.As(cbErr, &cce) {
 			currentItem, fetchErr := a.fetchJob(ctx, jobID)
 			status := "unknown"
 			if fetchErr == nil {
@@ -431,13 +462,17 @@ func (a *App) releaseJobHandler(c *gin.Context) {
 			c.JSON(http.StatusConflict, gin.H{"detail": fmt.Sprintf("Job cannot be released. Current status: %s", status)})
 			return
 		}
-		a.logger.Error("failed to release job", zap.Error(err), zap.String("jobId", jobID))
+		a.logger.Error("failed to release job", zap.Error(cbErr), zap.String("jobId", jobID))
+		if isCircuitBreakerError(cbErr) {
+			c.JSON(http.StatusServiceUnavailable, gin.H{"detail": "database service temporarily unavailable"})
+			return
+		}
 		c.JSON(http.StatusInternalServerError, gin.H{"detail": "failed to release job"})
 		return
 	}
 
 	var updated JobItem
-	if err := attributevalue.UnmarshalMap(resp.Attributes, &updated); err != nil {
+	if err := attributevalue.UnmarshalMap(releaseResp.Attributes, &updated); err != nil {
 		a.logger.Error("failed to unmarshal updated job", zap.Error(err), zap.String("jobId", jobID))
 		c.JSON(http.StatusInternalServerError, gin.H{"detail": "failed to release job"})
 		return
@@ -453,7 +488,7 @@ func (a *App) releaseJobHandler(c *gin.Context) {
 			a.logger.Error("rollback to HELD failed — job stuck in RELEASED",
 				zap.Error(rollbackErr), zap.String("jobId", jobID))
 		}
-		if errors.Is(err, gobreaker.ErrOpenState) {
+		if isCircuitBreakerError(err) {
 			c.JSON(http.StatusServiceUnavailable, gin.H{"detail": "queue service temporarily unavailable"})
 			return
 		}
@@ -483,27 +518,32 @@ func (a *App) cancelJobHandler(c *gin.Context) {
 		return
 	}
 
-	resp, err := a.dynamo.UpdateItem(ctx, &dynamodb.UpdateItemInput{
-		TableName: aws.String(a.config.DynamoTable),
-		Key: map[string]dbtypes.AttributeValue{
-			"jobId": &dbtypes.AttributeValueMemberS{Value: jobID},
-		},
-		UpdateExpression:    aws.String("SET #s = :new_status, updatedAt = :now, version = version + :inc"),
-		ConditionExpression: aws.String("#s = :held"),
-		ExpressionAttributeNames: map[string]string{
-			"#s": "status",
-		},
-		ExpressionAttributeValues: map[string]dbtypes.AttributeValue{
-			":new_status": &dbtypes.AttributeValueMemberS{Value: "CANCELLED"},
-			":now":        &dbtypes.AttributeValueMemberS{Value: time.Now().UTC().Format(time.RFC3339Nano)},
-			":held":       &dbtypes.AttributeValueMemberS{Value: "HELD"},
-			":inc":        &dbtypes.AttributeValueMemberN{Value: "1"},
-		},
-		ReturnValues: dbtypes.ReturnValueAllNew,
+	var cancelResp *dynamodb.UpdateItemOutput
+	_, cbErr := a.dynamoBreaker.Execute(func() ([]byte, error) {
+		var err error
+		cancelResp, err = a.dynamo.UpdateItem(ctx, &dynamodb.UpdateItemInput{
+			TableName: aws.String(a.config.DynamoTable),
+			Key: map[string]dbtypes.AttributeValue{
+				"jobId": &dbtypes.AttributeValueMemberS{Value: jobID},
+			},
+			UpdateExpression:    aws.String("SET #s = :new_status, updatedAt = :now, version = version + :inc"),
+			ConditionExpression: aws.String("#s = :held"),
+			ExpressionAttributeNames: map[string]string{
+				"#s": "status",
+			},
+			ExpressionAttributeValues: map[string]dbtypes.AttributeValue{
+				":new_status": &dbtypes.AttributeValueMemberS{Value: "CANCELLED"},
+				":now":        &dbtypes.AttributeValueMemberS{Value: time.Now().UTC().Format(time.RFC3339Nano)},
+				":held":       &dbtypes.AttributeValueMemberS{Value: "HELD"},
+				":inc":        &dbtypes.AttributeValueMemberN{Value: "1"},
+			},
+			ReturnValues: dbtypes.ReturnValueAllNew,
+		})
+		return nil, err
 	})
-	if err != nil {
+	if cbErr != nil {
 		var cce *dbtypes.ConditionalCheckFailedException
-		if errors.As(err, &cce) {
+		if errors.As(cbErr, &cce) {
 			refreshed, fetchErr := a.fetchJob(ctx, jobID)
 			if fetchErr == nil {
 				c.JSON(http.StatusConflict, gin.H{"detail": fmt.Sprintf("Job cannot be cancelled. Current status: %s", refreshed.Status)})
@@ -513,13 +553,17 @@ func (a *App) cancelJobHandler(c *gin.Context) {
 			c.JSON(http.StatusConflict, gin.H{"detail": "Job cannot be cancelled because its status changed; please retry"})
 			return
 		}
-		a.logger.Error("failed to cancel job", zap.Error(err), zap.String("jobId", jobID))
+		a.logger.Error("failed to cancel job", zap.Error(cbErr), zap.String("jobId", jobID))
+		if isCircuitBreakerError(cbErr) {
+			c.JSON(http.StatusServiceUnavailable, gin.H{"detail": "database service temporarily unavailable"})
+			return
+		}
 		c.JSON(http.StatusInternalServerError, gin.H{"detail": "failed to cancel job"})
 		return
 	}
 
 	var updated JobItem
-	if err := attributevalue.UnmarshalMap(resp.Attributes, &updated); err != nil {
+	if err := attributevalue.UnmarshalMap(cancelResp.Attributes, &updated); err != nil {
 		a.logger.Error("failed to unmarshal cancelled job", zap.Error(err), zap.String("jobId", jobID))
 		c.JSON(http.StatusInternalServerError, gin.H{"detail": "failed to cancel job"})
 		return
@@ -543,14 +587,20 @@ func (a *App) cancelJobHandler(c *gin.Context) {
 // ---------------------------------------------------------------------------
 
 func (a *App) fetchJob(ctx context.Context, jobID string) (*JobItem, error) {
-	resp, err := a.dynamo.GetItem(ctx, &dynamodb.GetItemInput{
-		TableName: aws.String(a.config.DynamoTable),
-		Key: map[string]dbtypes.AttributeValue{
-			"jobId": &dbtypes.AttributeValueMemberS{Value: jobID},
-		},
-	})
-	if err != nil {
+	// Wrap through DynamoDB circuit breaker for consistent failure tracking.
+	var resp *dynamodb.GetItemOutput
+	_, cbErr := a.dynamoBreaker.Execute(func() ([]byte, error) {
+		var err error
+		resp, err = a.dynamo.GetItem(ctx, &dynamodb.GetItemInput{
+			TableName: aws.String(a.config.DynamoTable),
+			Key: map[string]dbtypes.AttributeValue{
+				"jobId": &dbtypes.AttributeValueMemberS{Value: jobID},
+			},
+		})
 		return nil, err
+	})
+	if cbErr != nil {
+		return nil, cbErr
 	}
 	if resp.Item == nil {
 		return nil, errNotFound
@@ -590,7 +640,7 @@ func (a *App) sendJobToPrinter(ctx context.Context, item *JobItem) error {
 	}
 	queueURL, ok := a.config.SQSQueueURLs[*item.PrinterName]
 	if !ok {
-		return fmt.Errorf("printer %s has no configured queue URL", *item.PrinterName)
+		return fmt.Errorf("printer %s has no configured SQS queue URL; check SQS_QUEUE_URLS configuration", *item.PrinterName)
 	}
 	body, err := json.Marshal(map[string]string{
 		"jobId": item.JobID,

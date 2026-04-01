@@ -24,6 +24,9 @@ func LoadConfig() (Config, error) {
 		if err != nil {
 			return Config{}, fmt.Errorf("invalid MAX_UPLOAD_BYTES: %w", err)
 		}
+		if parsed <= 0 {
+			return Config{}, fmt.Errorf("invalid MAX_UPLOAD_BYTES: must be > 0, got %d", parsed)
+		}
 		maxUpload = parsed
 	}
 
