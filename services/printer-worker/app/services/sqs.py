@@ -19,3 +19,11 @@ def delete_message(receipt_handle: str):
         QueueUrl=SQS_QUEUE_URL,
         ReceiptHandle=receipt_handle,
     )
+
+
+def extend_visibility(receipt_handle: str, timeout: int = 60):
+    _client.change_message_visibility(
+        QueueUrl=SQS_QUEUE_URL,
+        ReceiptHandle=receipt_handle,
+        VisibilityTimeout=timeout,
+    )

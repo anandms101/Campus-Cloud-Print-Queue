@@ -42,6 +42,22 @@ def mark_processing(job_id: str) -> bool:
         raise
 
 
+def mark_reprocessing(job_id: str) -> int:
+    """Refresh updatedAt and increment reprocess_count for a stuck PROCESSING job. Returns the new reprocess_count."""
+    now = datetime.now(timezone.utc).isoformat()
+    resp = _table.update_item(
+        Key={"jobId": job_id},
+        UpdateExpression="SET updatedAt = :now, reprocess_count = if_not_exists(reprocess_count, :zero) + :inc",
+        ExpressionAttributeValues={
+            ":now": now,
+            ":zero": 0,
+            ":inc": 1,
+        },
+        ReturnValues="UPDATED_NEW",
+    )
+    return int(resp["Attributes"].get("reprocess_count", 1))
+
+
 def mark_done(job_id: str) -> bool:
     """Conditional update: PROCESSING -> DONE. Returns False if condition fails."""
     now = datetime.now(timezone.utc).isoformat()
@@ -82,6 +98,6 @@ def mark_failed(job_id: str):
         )
     except ClientError as e:
         if e.response["Error"]["Code"] == "ConditionalCheckFailedException":
-            logger.warning(f"mark_failed skipped for {job_id}: status already changed")
+            logger.warning("mark_failed skipped for %s: status already changed", job_id)
         else:
-            logger.error(f"mark_failed DynamoDB error for {job_id}: {e}")
+            logger.error("mark_failed DynamoDB error for %s: %s", job_id, e)
