@@ -3,7 +3,6 @@
 Uses moto to mock DynamoDB and S3 so tests run without real AWS resources.
 """
 
-import json
 import importlib
 import pytest
 import boto3
@@ -14,11 +13,13 @@ REGION = "us-west-2"
 
 
 def _make_sqs_message(job_id, s3_key, receive_count="1"):
-    return {
-        "Body": json.dumps({"jobId": job_id, "s3Key": s3_key}),
-        "ReceiptHandle": "test-receipt",
-        "Attributes": {"ApproximateReceiveCount": receive_count},
-    }
+    from app.processor import PrintJob
+    return PrintJob(
+        job_id=job_id,
+        s3_key=s3_key,
+        receive_count=int(receive_count),
+        receipt_handle="test-receipt",
+    )
 
 
 @pytest.fixture
