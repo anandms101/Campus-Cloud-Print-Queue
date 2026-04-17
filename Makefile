@@ -1,3 +1,21 @@
+# =============================================================================
+# Campus Cloud Print Queue — Developer Makefile
+#
+# Single entry point for infrastructure, Docker, deployment, monitoring,
+# testing, Go development, and experiment execution.
+#
+# Conventions:
+#   - Every public target has a `## <description>` comment parsed by `make help`.
+#   - Targets are grouped into logical sections separated by banners.
+#   - AWS_REGION and PROJECT are set once at the top; every target inherits them.
+#
+# One-command workflows:
+#   make deploy-fresh   — bootstrap from zero: init TF -> apply -> push images
+#                         -> force ECS deploy -> poll /health until live
+#   make deploy         — day-to-day: rebuild images -> push -> rolling restart
+#   make teardown       — destroy everything (stop spending money)
+# =============================================================================
+
 AWS_REGION := us-west-2
 PROJECT := campus-print
 AWS_ACCOUNT_ID := $(shell aws sts get-caller-identity --query Account --output text 2>/dev/null)
@@ -20,6 +38,7 @@ infra-init: ## Initialize Terraform
 infra-plan: ## Preview infrastructure changes
 	cd infra && terraform plan
 
+# -auto-approve so this target can be chained in deploy-fresh.
 infra-apply: ## Deploy infrastructure
 	cd infra && terraform apply -auto-approve
 
@@ -34,6 +53,7 @@ infra-output: ## Show Terraform outputs
 ecr-login: ## Login to ECR
 	aws ecr get-login-password --region $(AWS_REGION) | docker login --username AWS --password-stdin $(ECR_BASE)
 
+# --platform linux/amd64 matches Fargate runtime; prevents arch mismatch on Apple Silicon.
 build-api: ## Build API Docker image (Go/Gin)
 	docker build --platform linux/amd64 -t $(PROJECT)-api services/api-gin/
 
@@ -52,6 +72,7 @@ push-all: push-api push-worker ## Build and push all images
 
 # ==================== Deployment ====================
 
+# Full bootstrap: init -> apply -> push -> force-deploy -> health poll.
 deploy-fresh: infra-init infra-apply push-all ## Full deploy from scratch (init + infra + images + ECS)
 	@echo ""
 	@echo "=== Forcing new ECS deployments ==="
@@ -74,6 +95,7 @@ deploy-fresh: infra-init infra-apply push-all ## Full deploy from scratch (init 
 	done; \
 	echo "WARNING: API not yet healthy. Check: make status"
 
+# Day-to-day: rebuild + push + rolling restart (skips infra).
 deploy: push-all ## Redeploy: build images + push + force new ECS deployment
 	@echo "Forcing new ECS deployments..."
 	aws ecs update-service --cluster $(PROJECT)-cluster --service $(PROJECT)-api --force-new-deployment --region $(AWS_REGION) --no-cli-pager > /dev/null
@@ -130,6 +152,7 @@ test-upload: ## Upload a test job
 		-F "file=@README.md" \
 		-F "userId=test-user" | python3 -m json.tool
 
+# Exercises the complete lifecycle: upload -> release -> wait -> verify DONE.
 test-e2e: ## Full E2E test: upload -> release -> wait -> verify DONE
 	@ALB=$$(cd infra && terraform output -raw alb_dns_name) && \
 	echo "=== End-to-End Test ===" && \
@@ -149,6 +172,7 @@ test-e2e: ## Full E2E test: upload -> release -> wait -> verify DONE
 
 # ==================== Go API Development ====================
 
+# -race catches concurrency bugs; -cover reports test coverage.
 go-test: ## Run Go API unit tests with race detector
 	cd services/api-gin && go test -v -race -cover ./...
 
@@ -160,6 +184,7 @@ go-build: ## Build Go API binary locally
 
 # ==================== Experiments ====================
 
+# --headless runs Locust without the web UI for scripted execution.
 exp1-load: ## Run Experiment 1: Locust load test (50 users, 60s)
 	@ALB=$$(cd infra && terraform output -raw alb_dns_name) && \
 	locust -f tests/experiment1_load_test/locustfile.py --host "http://$$ALB" \

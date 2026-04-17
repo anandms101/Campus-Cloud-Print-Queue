@@ -1,6 +1,26 @@
+# -----------------------------------------------------------------------------
+# ECS Module
+#
+# Purpose : Fargate cluster, task definitions, and services for the Go API
+#           and per-printer Python workers.
+# Inputs  : var.project_name, var.aws_region, networking IDs, IAM role ARNs,
+#           container images, storage/queue names, sizing vars, log groups
+# Outputs : cluster_name, cluster_arn, api_service_name
+# Design  : Fargate eliminates EC2 node management.  containerInsights is
+#           enabled for CloudWatch metrics.  The API runs 2 tasks behind the
+#           ALB with a 50/200 deployment strategy for zero-downtime rolling
+#           updates.  Each printer runs as a standalone 1-task service with
+#           0/100 deployment (stop-then-start) because two workers on the
+#           same queue would cause duplicate prints.
+#           lifecycle { ignore_changes = [task_definition] } on every service
+#           lets `make deploy` push new images via the AWS CLI without
+#           Terraform reverting the task definition on the next apply.
+# -----------------------------------------------------------------------------
+
 resource "aws_ecs_cluster" "main" {
   name = "${var.project_name}-cluster"
 
+  # Feeds per-service CPU/memory metrics into CloudWatch automatically.
   setting {
     name  = "containerInsights"
     value = "enabled"
@@ -49,6 +69,7 @@ resource "aws_ecs_task_definition" "api" {
   }])
 }
 
+# 50/200 — starts a new task before stopping the old one (zero-downtime).
 resource "aws_ecs_service" "api" {
   name            = "${var.project_name}-api"
   cluster         = aws_ecs_cluster.main.id
@@ -73,6 +94,8 @@ resource "aws_ecs_service" "api" {
   deployment_minimum_healthy_percent = 50
   deployment_maximum_percent         = 200
 
+  # Ignore task_definition so `make deploy` (force-new-deployment) doesn't
+  # conflict with Terraform on the next apply.
   lifecycle {
     ignore_changes = [task_definition]
   }
@@ -115,6 +138,8 @@ resource "aws_ecs_task_definition" "printer" {
   }])
 }
 
+# 0/100 (stop-then-start) — each queue must have exactly one consumer
+# to prevent duplicate prints.
 resource "aws_ecs_service" "printer" {
   for_each = toset(var.printer_names)
 

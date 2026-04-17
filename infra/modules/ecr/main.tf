@@ -1,3 +1,15 @@
+# -----------------------------------------------------------------------------
+# ECR Module
+#
+# Purpose : Container image registries for the API and printer-worker services.
+# Inputs  : var.project_name
+# Outputs : api_repository_url, worker_repository_url
+# Design  : MUTABLE tags so `make push-api` can overwrite :latest without
+#           needing a new tag per deploy.  force_delete = true allows clean
+#           teardown in lab environments.  Lifecycle policies cap storage at
+#           5 images per repo to control cost.
+# -----------------------------------------------------------------------------
+
 resource "aws_ecr_repository" "api" {
   name                 = "${var.project_name}-api"
   image_tag_mutability = "MUTABLE"
@@ -18,6 +30,7 @@ resource "aws_ecr_repository" "worker" {
   }
 }
 
+# Cap at 5 images per repo to prevent unbounded storage cost.
 resource "aws_ecr_lifecycle_policy" "api" {
   repository = aws_ecr_repository.api.name
 

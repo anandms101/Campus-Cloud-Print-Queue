@@ -1,3 +1,18 @@
+# -----------------------------------------------------------------------------
+# CloudWatch Module
+#
+# Purpose : Log groups for ECS containers and an operational dashboard that
+#           visualises key metrics across ALB, SQS, DynamoDB, and ECS.
+# Inputs  : var.project_name, var.aws_region, var.alb_arn_suffix,
+#           var.target_group_arn_suffix, var.printer_names
+# Outputs : api_log_group_name, printer_log_group_name, dashboard_name
+# Design  : 7-day log retention keeps cost low in a lab account.  Dashboard
+#           widgets map 1:1 to the four course experiments: load testing (ALB
+#           request count + latency), contention (DynamoDB consumed capacity),
+#           saturation (SQS queue depth), and fault injection (ECS CPU/memory).
+# -----------------------------------------------------------------------------
+
+# Must exist before ECS tasks start or the awslogs driver will fail.
 resource "aws_cloudwatch_log_group" "api" {
   name              = "/ecs/${var.project_name}-api"
   retention_in_days = 7
@@ -8,6 +23,7 @@ resource "aws_cloudwatch_log_group" "printer" {
   retention_in_days = 7
 }
 
+# Unified operational dashboard — one view for all experiments and demos.
 resource "aws_cloudwatch_dashboard" "main" {
   dashboard_name = "${var.project_name}-dashboard"
 

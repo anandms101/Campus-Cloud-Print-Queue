@@ -1,3 +1,15 @@
+# =============================================================================
+# Campus Cloud Print Queue — CI Pipeline
+#
+# Triggers : every push and pull request targeting the main branch.
+# Strategy : four independent jobs run in parallel so the full suite completes
+#            in ~2 minutes.  Each job validates one layer of the stack:
+#              1. api-checks       — Go vet / build / test with race detector
+#              2. python-checks    — worker compile check + pytest
+#              3. terraform-checks — fmt / init / validate (no AWS creds needed)
+#              4. docker-build     — both Dockerfiles produce valid images
+# =============================================================================
+
 name: CI
 
 on:
@@ -7,6 +19,7 @@ on:
     branches: [main]
 
 jobs:
+  # Go static analysis, compilation, and tests with race detection.
   api-checks:
     runs-on: ubuntu-latest
     steps:
@@ -28,6 +41,7 @@ jobs:
         working-directory: services/api-gin
         run: go test -v -race -cover ./...
 
+  # Python syntax + unit tests with mocked AWS services (no creds needed).
   python-checks:
     runs-on: ubuntu-latest
     steps:
@@ -43,6 +57,7 @@ jobs:
       - name: Install test dependencies
         run: pip install -r requirements-dev.txt
 
+      # py_compile is a fast syntax gate before the full pytest suite.
       - name: Compile check — Worker
         run: python -m py_compile services/printer-worker/app/main.py
 
@@ -54,6 +69,8 @@ jobs:
           S3_BUCKET: test-bucket
           SQS_QUEUE_URLS: "{}"
 
+  # Validates HCL formatting, provider config, and module wiring.
+  # -backend=false skips provider auth so CI runs without AWS credentials.
   terraform-checks:
     runs-on: ubuntu-latest
     steps:
@@ -75,6 +92,8 @@ jobs:
         working-directory: infra
         run: terraform validate
 
+  # Builds both images on linux/amd64 to catch Dockerfile errors and
+  # architecture mismatches before code reaches main.
   docker-build:
     runs-on: ubuntu-latest
     steps:

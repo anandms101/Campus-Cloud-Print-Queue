@@ -1,3 +1,17 @@
+# -----------------------------------------------------------------------------
+# Campus Cloud Print Queue — Root Terraform Configuration
+#
+# Purpose : Compose nine single-responsibility modules into a complete AWS
+#           deployment for the campus print queue system.
+# Design  : Each module owns one AWS concern (networking, storage, compute…).
+#           The root wires outputs -> inputs between them, keeping each module
+#           independently reviewable, testable, and destroyable.
+# Order   : Modules are declared in dependency order — networking and stateless
+#           resources first, then IAM, then compute (ECS) last.
+# Tags    : default_tags ensure every resource is labelled for cost tracking
+#           and ownership without repeating tags in each module.
+# -----------------------------------------------------------------------------
+
 terraform {
   required_version = ">= 1.0"
 
@@ -16,6 +30,7 @@ terraform {
 provider "aws" {
   region = var.aws_region
 
+  # Propagates Project/Environment/ManagedBy to every resource automatically.
   default_tags {
     tags = {
       Project     = "CampusCloudPrint"
@@ -27,20 +42,20 @@ provider "aws" {
 
 data "aws_caller_identity" "current" {}
 
-# --- Networking ---
+# --- Networking (VPC, subnets, SGs) — must exist before ALB and ECS ---
 module "networking" {
   source       = "./modules/networking"
   project_name = var.project_name
   aws_region   = var.aws_region
 }
 
-# --- ECR ---
+# --- ECR (container registries) — must exist before ECS image references ---
 module "ecr" {
   source       = "./modules/ecr"
   project_name = var.project_name
 }
 
-# --- IAM ---
+# --- IAM — references pre-provisioned LabRole for ECS task execution ---
 module "iam" {
   source             = "./modules/iam"
   project_name       = var.project_name
@@ -51,26 +66,26 @@ module "iam" {
   sqs_queue_arns     = module.sqs.queue_arns
 }
 
-# --- DynamoDB ---
+# --- DynamoDB — job metadata store, ARN/name flow into IAM and ECS ---
 module "dynamodb" {
   source       = "./modules/dynamodb"
   project_name = var.project_name
 }
 
-# --- S3 ---
+# --- S3 — document storage, ARN/name flow into IAM and ECS ---
 module "s3" {
   source       = "./modules/s3"
   project_name = var.project_name
 }
 
-# --- SQS ---
+# --- SQS — one queue per printer for job routing ---
 module "sqs" {
   source        = "./modules/sqs"
   project_name  = var.project_name
   printer_names = var.printer_names
 }
 
-# --- ALB ---
+# --- ALB — single public entry point; exposes arn_suffix to CloudWatch ---
 module "alb" {
   source            = "./modules/alb"
   project_name      = var.project_name
@@ -79,7 +94,7 @@ module "alb" {
   alb_sg_id         = module.networking.alb_sg_id
 }
 
-# --- CloudWatch ---
+# --- CloudWatch — log groups (must exist before ECS) + dashboard ---
 module "cloudwatch" {
   source                  = "./modules/cloudwatch"
   project_name            = var.project_name
@@ -89,7 +104,7 @@ module "cloudwatch" {
   printer_names           = var.printer_names
 }
 
-# --- ECS ---
+# --- ECS — declared last; depends on networking, IAM, ECR, storage, logs ---
 module "ecs" {
   source                = "./modules/ecs"
   project_name          = var.project_name
