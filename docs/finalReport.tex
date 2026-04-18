@@ -176,11 +176,11 @@
 ]
   {\small\bfseries\color{muted}\MakeUppercase{Team Members}\par}
   \vspace{6pt}
-  \begin{tabular}{@{}ll@{}}
-    \textbf{Anand Mohan Singh}    & Infrastructure (Terraform, 9 modules, Makefile) \\[3pt]
+  \begin{tabularx}{\linewidth}{@{}lX@{}}
+    \textbf{Anand Mohan Singh}    & Infrastructure (Terraform, 9 modules), CI/CD, resilience migration, unit tests \\[3pt]
     \textbf{Vaibhav Thalanki}     & API development (Go Gin, DynamoDB schema, concurrency logic) \\[3pt]
     \textbf{Pranav Viswanathan}   & Printer worker, experiment scripts, CloudWatch observability \\
-  \end{tabular}
+  \end{tabularx}
 \end{tcolorbox}
 
 \vspace{0.8cm}
@@ -195,7 +195,7 @@
 ]
   {\small\bfseries\color{muted}\MakeUppercase{Repository}\par}
   \vspace{4pt}
-  \url{https://github.com/anandms101/CampusCloud-Print-Queue}
+  \url{https://github.com/anandms101/Campus-Cloud-Print-Queue}
 \end{tcolorbox}
 
 \vfill
@@ -247,7 +247,7 @@ Pranav covers the Python printer worker: the SQS long-polling loop, the idempote
   arc=2pt,
   left=8pt, right=8pt, top=5pt, bottom=5pt,
 ]
-  \textbf{Video link:} \url{https://github.com/anandms101/CampusCloud-Print-Queue} (linked from README)
+  \textbf{Video link:} \url{https://youtu.be/KXTG66NV9Wc}
 \end{tcolorbox}
 
 
@@ -256,7 +256,7 @@ Pranav covers the Python printer worker: the SQS long-polling loop, the idempote
 \label{sec:code}
 
 \subsection{Primary Repository}
-\url{https://github.com/anandms101/CampusCloud-Print-Queue}
+\url{https://github.com/anandms101/Campus-Cloud-Print-Queue}
 
 The repository was developed collaboratively with commits from all three team members. Commit history, branch activity, and issue tracking reflect the progression of the project from initial architecture through final experiment execution.
 
@@ -325,25 +325,44 @@ The Go unit test suite (\code{handlers\_test.go}, 25 tests) exercises all seven 
 \section{Project Management [5 marks]}
 \label{sec:pm}
 
+\subsection{Project Board}
+We tracked all work through a GitHub Projects Kanban board with five columns: \textbf{Backlog}, \textbf{Ready}, \textbf{In Progress}, \textbf{In Review}, and \textbf{Done}. The board contains 20 issues --- all 20 are now closed and in the Done column. Four pull requests were merged over the course of the project, each linked to one or more issues. Every issue was assigned to at least one team member, and experiments were co-assigned to the pair who executed them together.
+
+\medskip
+\url{https://github.com/users/anandms101/projects/4}
+
+\begin{figure}[H]
+\centering
+\includegraphics[width=\linewidth]{../public/GithubProject.png}
+\caption{GitHub Projects board snapshot --- all 20 issues in the Done column, spanning infrastructure, API development, printer workers, four experiments, CI/CD, testing, documentation, and the final report.}
+\end{figure}
+
 \subsection{Work Breakdown by Team Member}
 
 \begin{table}[H]
 \centering
-\caption{Responsibility Matrix}
+\caption{Responsibility Matrix (GitHub issue references in parentheses)}
 \begin{tabularx}{\linewidth}{@{}lXcc@{}}
 \toprule
 \textbf{Area} & \textbf{Description} & \textbf{Owner} & \textbf{Status} \\
 \midrule
-Terraform (9 modules)    & VPC, ECR, IAM, DynamoDB, S3, SQS, ALB, ECS, CloudWatch & Anand & \textcolor{success}{Done} \\
-Makefile automation      & 20+ targets: deploy, teardown, logs, queue-depth, e2e test & Anand & \textcolor{success}{Done} \\
-CI/CD (GitHub Actions)   & 4-job pipeline: go vet, pytest, terraform validate, docker build & Anand & \textcolor{success}{Done} \\
-Go Gin API service       & 7 handlers, middleware, circuit breaker, bulkhead, rate limiter & Vaibhav & \textcolor{success}{Done} \\
-DynamoDB schema          & Table, GSI (userId-createdAt-index), TTL, conditional expressions & Vaibhav & \textcolor{success}{Done} \\
-FastAPI variant          & Python API alternative with Bulkhead isolation on POST /jobs & Vaibhav & \textcolor{success}{Done} \\
-Unit tests (Go + Python) & 25 Go tests (mocks), 10 Python tests (moto) & Vaibhav + Pranav & \textcolor{success}{Done} \\
-Printer worker           & SQS poll loop, idempotency state machine, heartbeat, S3 cleanup & Pranav & \textcolor{success}{Done} \\
-Experiment scripts       & Locust (Exp 1), asyncio/aiohttp (Exp 2), requests (Exp 3), AWS CLI (Exp 4) & Pranav & \textcolor{success}{Done} \\
-CloudWatch observability & Log groups (7-day retention), 6-panel dashboard, structured JSON logging & Pranav & \textcolor{success}{Done} \\
+Infra \& Terraform (\#9, \#5) & 9 modules (VPC, ECR, IAM, DynamoDB, S3, SQS, ALB, ECS, CloudWatch), Makefile with 20+ targets & Anand & \textcolor{success}{Done} \\
+CI/CD Pipeline (\#13)   & 4-job GitHub Actions: go vet, pytest, terraform validate, docker build & Anand & \textcolor{success}{Done} \\
+CloudWatch (\#16)        & 6-panel dashboard, log groups (7-day retention), structured JSON logging & Anand & \textcolor{success}{Done} \\
+Load Test Graphs (\#15)  & Locust result analysis, latency percentile charts for Experiment 1 & Anand & \textcolor{success}{Done} \\
+Go Gin API (\#7, \#6)    & 7 handlers, middleware, circuit breaker, bulkhead, rate limiter & Vaibhav & \textcolor{success}{Done} \\
+Go Gin Resilience (PR \#20) & Migrate to Go Gin as sole API with full resilience patterns & Anand & \textcolor{success}{Done} \\
+FastAPI variant (\#8)    & Python API alternative with Bulkhead isolation on POST /jobs & Vaibhav & \textcolor{success}{Done} \\
+DynamoDB schema          & Table, GSI (\code{userId-createdAt-index}), TTL, conditional expressions & Vaibhav & \textcolor{success}{Done} \\
+S3 cleanup (PR \#1)      & Delete S3 objects after job processing completes & Vaibhav & \textcolor{success}{Done} \\
+Printer worker (\#10)    & SQS poll loop, idempotency state machine, heartbeat, S3 download & Pranav & \textcolor{success}{Done} \\
+Unit tests (\#12)        & 25 Go tests (mocks) + 10 Python tests (moto); 29 total with race detector & Anand + Pranav & \textcolor{success}{Done} \\
+Experiment scripts (\#4) & Locust (Exp 1, PR \#3), asyncio (Exp 2), requests (Exp 3), AWS CLI (Exp 4) & Pranav + Vaibhav & \textcolor{success}{Done} \\
+Contention Exp (\#17)    & DynamoDB conditional-write concurrency validation at N=2--50 & Pranav + Vaibhav & \textcolor{success}{Done} \\
+Saturation Exp (\#18)    & 50-job single-printer overload; queue drain and latency measurement & Pranav + Vaibhav & \textcolor{success}{Done} \\
+Fault Injection Exp (\#19) & ECS task kill, SQS redelivery, idempotent recovery for 8 jobs & Pranav + Vaibhav & \textcolor{success}{Done} \\
+Architecture docs (\#14) & System diagrams, \code{ARCHITECTURE.md}, README & All & \textcolor{success}{Done} \\
+Final report (\#11)      & This document: experiments analysis, graphs, and writeup & All & \textcolor{success}{Done} \\
 \bottomrule
 \end{tabularx}
 \end{table}
