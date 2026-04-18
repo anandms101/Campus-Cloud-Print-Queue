@@ -4,8 +4,9 @@ A distributed print job management system built on AWS, demonstrating release-at
 
 **Team:** Anand Mohan Singh, Vaibhav Thalanki, Pranav Viswanathan
 
-**Introduction Video:** [CampusPrint_Introduction_CS6650.mp4](public/CampusPrint_Introduction_CS6650.mp4)
+**Demo Video:**
 
+[![Watch the demo on YouTube](https://img.youtube.com/vi/KXTG66NV9Wc/maxresdefault.jpg)](https://youtu.be/KXTG66NV9Wc)
 ## Architecture
 
 ![System Architecture](public/diagrams/system-overview.png)

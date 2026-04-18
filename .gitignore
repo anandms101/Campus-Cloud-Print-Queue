@@ -46,3 +46,10 @@ docs/milestone-report.pdf
 
 # Test PDFs
 public/book1.pdf
+docs/finalReport.aux
+docs/finalReport.fdb_latexmk
+docs/finalReport.fls
+docs/finalReport.log
+docs/finalReport.out
+docs/finalReport.synctex.gz
+docs/finalReport.toc
