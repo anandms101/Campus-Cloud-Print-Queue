@@ -17,7 +17,8 @@
 | Resource | Link |
 |----------|------|
 | GitHub repository | https://github.com/anandms101/Campus-Cloud-Print-Queue |
-| Experiments report (PDF) | [`docs/CampusPrint_Final_Report.pdf`](https://github.com/anandms101/Campus-Cloud-Print-Queue/blob/main/docs/CampusPrint_Final_Report.pdf) |
+| Experiments report (PDF) | [`docs/CampusPrint_Experiments_Report.pdf`](https://github.com/anandms101/Campus-Cloud-Print-Queue/blob/main/docs/CampusPrint_Experiments_Report.pdf) |
+| Final report (PDF) | [`docs/CampusPrint_Final_Report.pdf`](https://github.com/anandms101/Campus-Cloud-Print-Queue/blob/main/docs/CampusPrint_Final_Report.pdf) |
 | Architecture doc | [`docs/ARCHITECTURE.md`](https://github.com/anandms101/Campus-Cloud-Print-Queue/blob/main/docs/ARCHITECTURE.md) |
 
 ---
