@@ -1,0 +1,28 @@
+sequenceDiagram
+    participant C as Client
+    participant A as API (Gin)
+    participant D as DynamoDB
+    participant Q as SQS (per-printer)
+
+    C->>A: POST /jobs/:id/release {printerName}
+    A->>D: GetItem(jobId)
+    D-->>A: job{status: HELD}
+
+    A->>D: UpdateItem<br/>SET status=RELEASED<br/>COND: status = HELD
+    alt ConditionalCheckFailed
+        D-->>A: error
+        A->>D: GetItem(jobId) re-fetch
+        D-->>A: current status
+        A-->>C: 409 Conflict (status: X)
+    else Success
+        D-->>A: updated item
+        A->>Q: SendMessage(jobId, s3Key)
+        alt SQS fails
+            Q-->>A: error
+            A->>D: UpdateItem<br/>SET status=HELD<br/>COND: status = RELEASED<br/>(rollback)
+            A-->>C: 500 / 503
+        else SQS ok
+            Q-->>A: ok
+            A-->>C: 200 OK (RELEASED)
+        end
+    end

@@ -1,0 +1,39 @@
+flowchart TB
+    Client[HTTP Client] --> ALB[ALB :80]
+    ALB --> Gin[Gin Router]
+
+    subgraph Middleware[Middleware chain - every request]
+        direction TB
+        M1[Recovery]
+        M2[RequestID]
+        M3[JSON Access Logger]
+        M4[CORS]
+        M5["Rate Limit<br/>100 rps, burst 20"]
+        M6["Timeout<br/>60s upload / 30s others"]
+        M1 --> M2 --> M3 --> M4 --> M5 --> M6
+    end
+
+    Gin --> Middleware
+    M5 -->|exceeded| R429a[HTTP 429]
+    M6 -->|deadline| R504[HTTP 504]
+
+    Middleware --> BH{"Bulkhead<br/>semaphore capacity = 4"}
+    BH -->|slot full| R429b[HTTP 429<br/>too many uploads]
+    BH -->|acquired| Handler[createJobHandler]
+
+    Handler --> CBS3["s3Breaker.Execute"]
+    CBS3 -->|open| R503a[HTTP 503<br/>storage unavailable]
+    CBS3 -->|closed| S3[(S3 PutObject)]
+
+    S3 --> CBDy["dynamoBreaker.Execute"]
+    CBDy -->|open| R503b[HTTP 503<br/>database unavailable]
+    CBDy -->|failed| Cleanup["Delete S3 orphan<br/>compensating action"]
+    CBDy -->|closed| DDB[(DynamoDB PutItem)]
+
+    DDB --> R201[HTTP 201 Created]
+    Cleanup --> R500[HTTP 500]
+
+    style BH fill:#ffe4b5
+    style CBS3 fill:#d4f1d4
+    style CBDy fill:#d4f1d4
+    style Cleanup fill:#ffd4d4

@@ -1,0 +1,18 @@
+stateDiagram-v2
+    [*] --> Closed
+
+    Closed: CLOSED (normal)\n- all requests pass through to AWS\n- count consecutive failures
+    Open: OPEN (tripped)\n- reject all requests instantly\n- return HTTP 503\n- do NOT call AWS
+    HalfOpen: HALF-OPEN (testing)\n- let 3 probe requests through\n- see if AWS has recovered
+
+    Closed --> Open: 5 consecutive failures
+    Open --> HalfOpen: after 15s cooldown
+    HalfOpen --> Closed: all 3 probes succeed
+    HalfOpen --> Open: any probe fails
+
+    note right of Closed
+        Filter: ConditionalCheckFailedException
+        is expected business logic (409 on
+        concurrent release) — NOT counted
+        as a failure.
+    end note

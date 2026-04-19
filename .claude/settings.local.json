@@ -1,0 +1,12 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(npx -y -p @mermaid-js/mermaid-cli mmdc -i docs/mermaid/api-resilience-pipeline.mmd -o public/diagrams/api-resilience-pipeline.png -b white)",
+      "Bash(npx -y -p @mermaid-js/mermaid-cli mmdc -i docs/mermaid/api-resilience-pipeline.mmd -o public/diagrams/api-resilience-pipeline.svg -b white)",
+      "Bash(npx -y -p @mermaid-js/mermaid-cli mmdc -i docs/mermaid/circuit-breaker-state.mmd -o public/diagrams/circuit-breaker-state.png -b white)",
+      "Bash(npx -y -p @mermaid-js/mermaid-cli mmdc -i docs/mermaid/circuit-breaker-state.mmd -o public/diagrams/circuit-breaker-state.svg -b white)",
+      "Bash(npx -y -p @mermaid-js/mermaid-cli mmdc -i docs/mermaid/release-conditional-write.mmd -o public/diagrams/release-conditional-write.png -b white)",
+      "Bash(npx -y -p @mermaid-js/mermaid-cli mmdc -i docs/mermaid/release-conditional-write.mmd -o public/diagrams/release-conditional-write.svg -b white)"
+    ]
+  }
+}
