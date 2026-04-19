@@ -5,6 +5,8 @@ infra/terraform.tfstate*
 infra/terraform.tfvars
 infra/.terraform.tfstate*
 
+.claude/
+
 # Python
 __pycache__/
 *.pyc
