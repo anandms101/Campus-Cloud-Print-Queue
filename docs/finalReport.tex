@@ -155,12 +155,12 @@
 {\color{white}\fontsize{28}{34}\selectfont\bfseries Campus Cloud Print Queue\par}
 \vspace{0.25cm}
 {\color{accent!70!white}\fontsize{13}{20}\selectfont
-  CS 6650 --- Building Scalable Distributed Systems\par}
+  \textbf{Campus Print} \par}
 \vspace{0.15cm}
 {\color{white!75!primary}\normalsize
-  Northeastern University \textperiodcentered{}
-  Final Project Report \textperiodcentered{}
-  April 2026\par}
+  CS 6650  \textperiodcentered{}
+  Building Scalable Distributed Systems \textperiodcentered{}
+  Final Project Report\par}
 
 % Gap between bar bottom (4.5cm from top) and the cards
 \vspace{1.6cm}
@@ -225,16 +225,16 @@
 \newpage
 
 % ============================================================
-\section{Video Presentation [5 marks]}
+\section{Video Presentation}
 \label{sec:video}
 
-The submission includes one screen-capture video in which each team member presents the portion of the project they personally built. No AI voice-overs are used; all narration is performed live by the respective team member. The video is segmented as follows.
+The submission includes one screen-capture video in which each team member presents the portion of the project they personally built. The video is segmented as follows.
 
-\subsection{Segment 1 --- Anand Mohan Singh (2--3 minutes)}
+\subsection{Segment 1 --- Vaibhav Thalanki}
+Vaibhav presents the Go Gin API service: the seven endpoint handlers, the DynamoDB conditional expression logic used for every state transition, the GSI schema design (\code{userId-createdAt-index}), middleware layering (request ID, structured logging, timeout, rate limiter), the circuit breaker configuration via \code{sony/gobreaker/v2}, and the bulkhead semaphore around the upload handler. He also demonstrates and explains the Bulkhead isolation applied to the \http{POST /jobs} endpoint in the Go Gin implementation.
+
+\subsection{Segment 2 --- Anand Mohan Singh }
 Anand walks through the infrastructure layer: the nine Terraform modules (\code{networking}, \code{ecr}, \code{iam}, \code{dynamodb}, \code{s3}, \code{sqs}, \code{alb}, \code{ecs}, \code{cloudwatch}), the use of \code{for\_each} over the \code{printer\_names} variable to instantiate per-printer SQS queues and ECS services, and the Makefile automation (\code{make deploy-fresh}, \code{make teardown}, \code{make queue-depth}, etc.). He demonstrates a live \code{terraform plan} output and shows the CloudWatch dashboard with all six panels active.
-
-\subsection{Segment 2 --- Vaibhav Thalanki (2--3 minutes)}
-Vaibhav presents the Go Gin API service: the seven endpoint handlers, the DynamoDB conditional expression logic used for every state transition, the GSI schema design (\code{userId-createdAt-index}), middleware layering (request ID, structured logging, timeout, rate limiter), the circuit breaker configuration via \code{sony/gobreaker/v2}, and the bulkhead semaphore around the upload handler. He also demonstrates the FastAPI variant and explains the Bulkhead isolation applied to the \http{POST /jobs} endpoint in the Go Gin implementation.
 
 \subsection{Segment 3 --- Pranav Viswanathan (2--3 minutes)}
 Pranav covers the Python printer worker: the SQS long-polling loop, the idempotency state machine in \code{processor.py} including the crash recovery branch (\code{status=PROCESSING} and \code{receiveCount > 1}), the visibility-extension heartbeat, and the compensating logic for S3 download failures. He then walks through all four experiment scripts (\code{locustfile.py}, \code{contention\_test.py}, \code{saturation\_test.py}, \code{fault\_injection\_test.py}) and the CloudWatch log group and dashboard configuration.
@@ -252,7 +252,7 @@ Pranav covers the Python printer worker: the SQS long-polling loop, the idempote
 
 
 % ============================================================
-\section{Code and Repository [5 marks]}
+\section{Code and Repository}
 \label{sec:code}
 
 \subsection{Primary Repository}
@@ -318,11 +318,11 @@ Every push and pull request to \code{main} triggers four parallel GitHub Actions
 \end{enumerate}
 
 \subsection{Testing Coverage}
-The Go unit test suite (\code{handlers\_test.go}, 25 tests) exercises all seven endpoints against mock AWS interfaces defined in \code{mocks\_test.go}. Cases include happy paths, validation errors, 409 conflict paths, bulkhead enforcement, circuit breaker state transitions, compensating rollbacks, and rate limiter rejection. The Python worker test suite (\code{test\_worker.py}, 10 tests) uses \code{moto} to simulate DynamoDB, S3, and SQS in-process, covering the normal flow, duplicate suppression, S3 failure handling, and crash recovery reprocessing.
+The Go unit test suite (\code{handlers\_test.go}, 25 tests) exercises all seven endpoints against mock AWS interfaces defined in \code{mocks\_test.go}. Cases include happy paths, validation errors, 409 conflict paths, bulkhead enforcement, circuit breaker state transitions, compensating rollbacks, and rate limiter rejection. The Python worker test suite (\code{test\_worker.py}, 10 tests) uses \code{moto} to simulate DynamoDB, S3, and SQS in-process, covering the normal flow, duplicate suppression, S3 failure handling, and crash recovery reprocessing. \\ \\ \\
 
 
 % ============================================================
-\section{Project Management [5 marks]}
+\section{Project Management}
 \label{sec:pm}
 
 \subsection{Project Board}
@@ -397,7 +397,7 @@ A second design change concerned the API framework. We originally planned to bui
   \item \textbf{AWS Academy LabRole constraints.} LabRole prevents creation of new IAM roles or users; task execution permissions required an inline policy rather than a managed role. Terraform's \code{data} block references the pre-existing LabRole.
   \item \textbf{NAT Gateway costs.} An initial Terraform plan included a NAT Gateway (\$33/month fixed). We switched ECS tasks to public subnets with public IPs, removing the NAT Gateway without sacrificing security (security groups prevent inbound access to worker tasks entirely).
   \item \textbf{SQS visibility timeout tuning.} Early experiments showed the worker occasionally re-receiving a message for a job still being actively processed (false redelivery). We added a visibility-extension heartbeat that extends the timeout by 60 seconds every 45 seconds of active processing, eliminating the false redelivery.
-  \item \textbf{Experiment 3 rate limiting.} During saturation testing, rapid bulk job uploads triggered the API's 100 req/s rate limiter (429 responses). We adjusted the upload pacing to 0.7 second intervals between releases, which brought the effective rate below the limiter threshold for the release endpoint. The 27 failed releases in the final run were due to this rate limit being hit before the pacing adjustment was fully applied, and are documented as a known limitation of the experiment configuration.
+  \item \textbf{Experiment 3 rate limiting.} During saturation testing, the client releases many jobs concurrently, which can trigger the API's rate limiter (HTTP 429 responses) on the release path. This is a limitation of the experimental client behavior rather than a queueing failure in the worker tier.
 \end{itemize}
 
 \subsection{Cost Model}
@@ -424,7 +424,7 @@ CloudWatch Logs                   & ---     & $<$\$1 & 7-day retention \\
 
 
 % ============================================================
-\section{Experiments [10 marks]}
+\section{Experiments}
 \label{sec:experiments}
 
 \subsection{System Overview}
@@ -464,6 +464,7 @@ The tradeoff is \textbf{stateless horizontal scaling} vs.\ stateful routing. A s
   \item Users: 50 concurrent, ramped over 10 seconds
   \item Duration: 120 seconds (60 second ramp + 60 second steady state)
   \item Weighted task mix: \http{POST /jobs} (upload), \http{GET /jobs/{id}} (status poll), \http{GET /jobs?userId=X} (list), \http{POST /jobs/{id}/release}, \http{DELETE /jobs/{id}}
+  \item Additional negative-path traffic: \http{GET /health}, \http{GET /jobs/{fakeId}} expecting 404, and \http{POST /jobs/{id}/release} with an invalid printer expecting 400
   \item Target: the public ALB DNS endpoint
 \end{itemize}
 
@@ -580,7 +581,7 @@ The tradeoff is \textbf{optimistic concurrency via conditional writes} vs.\ \tex
 
 \textbf{Configuration:}
 \begin{itemize}[noitemsep]
-  \item For each concurrency level $N \in \{2, 5, 10, 20, 50\}$: create one new \texttt{HELD} job, fire $N$ concurrent release requests targeting different printers simultaneously via \code{asyncio.gather}.
+  \item For each concurrency level $N \in \{2, 5, 10, 20, 50\}$: create one new \texttt{HELD} job, then fire $N$ concurrent release requests to the same printer via \code{asyncio.gather}.
   \item Record: number of HTTP 200, number of HTTP 409, number of other errors, response latency per request.
   \item Assertion: exactly 1 success, $N-1$ conflicts, 0 errors at every level.
 \end{itemize}
@@ -685,21 +686,21 @@ We tested a single job per concurrency level. In production, many jobs would be 
 \label{sec:exp3}
 
 \begin{claimbox}
-Per-printer SQS queues isolate throughput between printers. Under overload (more jobs released than a single worker can drain in real time), the queue absorbs the backlog without dropping or corrupting jobs. Latency degrades linearly with queue depth, not through errors.
+Per-printer SQS queues isolate throughput between printers. For jobs that are successfully released to an overloaded printer, the queue absorbs the backlog without dropping or corrupting jobs. Under the concurrent flood used in this experiment, overload appears as a combination of API-side throttling and increased end-to-end latency rather than silent loss.
 \end{claimbox}
 
 \subsubsection{Purpose and Tradeoff Explored}
 The tradeoff is \textbf{per-printer queues} vs.\ \textbf{a global queue}. A global queue with a printer affinity field requires workers to inspect and skip jobs not for their printer, creating head-of-line blocking: a slow printer-1 stalls jobs queued for printer-2 behind it. Per-printer queues give each physical device an independent backlog with no cross-printer interference, at the cost of $3\times$ the SQS resources (negligible at \$0.40/million messages). The saturation test measures linear latency growth under overload and confirms that printer-2 and printer-3 are unaffected.
 
 \subsubsection{Methodology}
-\textbf{Tool:} Python \code{requests} library (\code{tests/experiment3\_saturation/saturation\_test.py})
+\textbf{Tool:} Python \code{aiohttp} (\code{tests/experiment3\_saturation/saturation\_test.py})
 
 \textbf{Configuration:}
 \begin{itemize}[noitemsep]
-  \item 50 jobs created and release-attempted to \code{printer-1} at 0.7 s intervals.
+  \item 50 jobs created and release-attempted to \code{printer-1} concurrently via \code{asyncio.gather}.
   \item Printer worker simulates a print job duration of 5--15 seconds (uniform random).
   \item Worker processes one message at a time (no intra-worker parallelism).
-  \item Metrics collected: total drain time, per-job end-to-end latency (release to DONE), error count, SQS queue depth (peak), job disposition (completed / queued-pending / failed-to-release).
+  \item Metrics collected: release phase duration, per-job end-to-end latency for jobs that reach \texttt{DONE}, and completion vs.\ timeout counts during polling.
 \end{itemize}
 
 \subsubsection{Results}
@@ -712,11 +713,10 @@ The tradeoff is \textbf{per-printer queues} vs.\ \textbf{a global queue}. A glob
 \textbf{Metric} & \textbf{Value} \\
 \midrule
 Jobs submitted (upload attempted)         & 50 \\
-Jobs successfully released                & 27 \\
-Failed to release (rate limited, 429)     & 27 \\
-Jobs completed (DONE)                     & 23 / 23 released-and-processed \\
-Timeouts or lost jobs                     & 0 \\
-SQS queue depth (peak)                    & \textasciitilde23 messages \\
+Jobs accepted by upload API               & 50 \\
+Jobs completed (DONE) within polling window & 23 \\
+Jobs still incomplete at timeout          & 27 \\
+Release status breakdown                  & Not persisted by the script \\
 Min end-to-end latency                    & 83.4 s \\
 Mean end-to-end latency                   & 350.5 s \\
 p50 latency                               & 395.6 s \\
@@ -752,31 +752,21 @@ p95 / p99 latency                         & 396.1 s \\
 };
 \end{axis}
 \end{tikzpicture}
-\hfill
-\begin{tikzpicture}
-\begin{axis}[
-  width=0.38\linewidth,
-  height=5cm,
-  hide axis,
-]
-% Doughnut workaround: just a legend-style table
-\end{axis}
-\end{tikzpicture}
 \caption{End-to-end latency distribution under saturation (Experiment 3). The tight p50--p99 cluster (395--396 s) reflects the queue draining at a near-constant rate with fixed worker throughput.}
 \end{figure}
 
 \subsubsection{Analysis}
 
 \begin{resultbox}
-All 23 successfully-released jobs completed without error or loss, even though the queue peaked at 23 pending messages. The system behaved as designed: under overload, jobs queue in SQS and drain sequentially at the worker's throughput ceiling (one job per 5--15 s). No jobs were dropped, no DynamoDB states were corrupted, and no SQS messages were lost or sent to the DLQ.
+The run recorded 23 jobs reaching \texttt{DONE} within the script's polling window, while 27 remained incomplete when the timeout was reached. This is consistent with a saturation scenario in which jobs are admitted quickly and then drain at the worker's fixed throughput ceiling (one job per 5--15 s), causing queueing delay to dominate end-to-end latency.
 
 The tight clustering of p50/p95/p99 around 395--396 seconds reflects a nearly linear relationship between a job's queue position and its wait time, which is the expected behavior of a FIFO-like drain with constant service rate. The minimum latency of 83.4 seconds corresponds to jobs near the front of the queue at release time, which were picked up almost immediately.
 
-The 27 failed releases (HTTP 429) are a consequence of the API's rate limiter interacting with the experiment's release pacing. These failures are a feature, not a bug: the rate limiter protected the API under burst traffic. A production system would use an exponential-backoff retry loop on the client side. The 4 jobs in the graphs described as ``released (pending)'' were in flight at the time of result collection and subsequently completed.
+Because the script saves only aggregate completion counts and latency samples, this run does not let us distinguish precisely between jobs that were still queued, still processing, or throttled during release. The defensible conclusion is therefore about backlog growth and long completion latency under overload, not an exact release-failure breakdown. A stronger version of the experiment would persist per-job release status codes and queue-depth snapshots alongside the completion data.
 \end{resultbox}
 
 \begin{limitbox}
-The experiment tested a single printer in isolation. We did not run simultaneous load on printer-2 and printer-3 to measure cross-printer isolation empirically (it was confirmed by inspection: the other workers' SQS queues showed zero depth during the run). A multi-printer saturation test with concurrent job floods to all three printers would provide a stronger isolation proof. Additionally, we did not simulate worker auto-scaling (there is none --- fixed at 1 task per printer), so the saturation behavior is deterministic and representative of the physical model.
+The experiment tested a single printer in isolation. We did not run simultaneous load on printer-2 and printer-3 to measure cross-printer isolation empirically. A multi-printer saturation test with concurrent job floods to all three printers would provide a stronger isolation proof. Additionally, the script does not record queue-depth snapshots or per-job release responses, so several intermediate states must be inferred from the final completion data.
 \end{limitbox}
 
 \medskip\hrule\medskip
@@ -795,15 +785,15 @@ The tradeoff is \textbf{Standard SQS with application-level idempotency} vs.\ \t
 The recovery mechanism relies on three AWS behaviors working together: ECS \code{desired\_count=1} (automatic task replacement on stop), SQS visibility timeout (60 s, message reappears after crash), and the worker's idempotency branch (\code{receiveCount > 1} with \code{status=PROCESSING} triggers re-processing).
 
 \subsubsection{Methodology}
-\textbf{Tool:} Python \code{requests} + AWS CLI (\code{tests/experiment4\_fault\_injection/fault\_injection\_test.py})
+\textbf{Tool:} Python \code{aiohttp} + AWS CLI (\code{tests/experiment4\_fault\_injection/fault\_injection\_test.py})
 
 \textbf{Configuration:}
 \begin{itemize}[noitemsep]
-  \item Release 8 jobs to \code{printer-3}.
+  \item Release a configurable batch of jobs to one target printer.
   \item Wait 10 seconds for the worker to begin processing.
-  \item Force-stop the printer-3 ECS task via \code{aws ecs stop-task}.
-  \item Poll DynamoDB every 5 seconds until all 8 jobs reach \texttt{DONE}.
-  \item Verify: zero duplicate \texttt{DONE} writes, zero stuck jobs, zero \texttt{FAILED} jobs.
+  \item Force-stop the ECS task for the selected printer service via \code{aws ecs stop-task}.
+  \item Poll the API every 10 seconds until all jobs reach \texttt{DONE} or the maximum wait time elapses.
+  \item Verify: all released jobs eventually complete and no job ends in \texttt{FAILED}.
 \end{itemize}
 
 The recovery flow unfolds as follows:
@@ -876,52 +866,6 @@ The zero stuck jobs result validates the ECS \code{desired\_count=1} auto-replac
 \begin{limitbox}
 The test killed the worker while only 1 job was in the PROCESSING state. A more adversarial test would kill the worker precisely while the \code{mark\_done} DynamoDB write is in flight, to verify the conditional write correctly handles the race between the dying worker's write and the recovering worker's re-process. Additionally, we tested only a single kill event; a repeated kill loop (simulating flapping) would test whether DLQ promotion (after 3 failed attempts) is triggered correctly when a job is truly unprocessable.
 \end{limitbox}
-
-
-% ============================================================
-\section{Community Contributions [5 marks]}
-\label{sec:community}
-
-\subsection{Piazza Posting}
-Under the ``Final Projects'' section on Piazza, we will post:
-\begin{enumerate}[noitemsep]
-  \item A link to our screen-capture video (one segment per team member).
-  \item A link to this experiments report (PDF).
-  \item A link to the public GitHub repository.
-\end{enumerate}
-
-\subsection{Related Projects}
-
-We will identify and comment on three Piazza final project postings most similar to ours. Our expected comparison dimensions are below.
-
-\subsubsection{Expected Similarity Criteria}
-Projects most similar to ours will share at least two of the following traits:
-\begin{itemize}[noitemsep]
-  \item Message-queue-driven asynchronous processing (SQS, RabbitMQ, Kafka).
-  \item Optimistic concurrency or conditional-write patterns for distributed state.
-  \item ECS or Kubernetes-based stateless API with external state in a managed database.
-  \item At-least-once delivery with application-level idempotency.
-\end{itemize}
-
-\subsubsection{Comparison Template (to be completed post-posting)}
-For each of the three selected projects, our Piazza comment will address:
-
-\textbf{Similarities:} Which architectural primitives do we share? (e.g., both use SQS for work distribution; both use DynamoDB conditional writes for concurrency control.)
-
-\textbf{Differences:} What design choices diverged and why? (e.g., their system uses FIFO SQS for ordering guarantees, which we traded for higher throughput with application idempotency; their API is stateful with in-memory caches, which we avoided for simpler horizontal scaling.)
-
-\textbf{What we learned:} What would we adopt from their design if we were to rebuild? (e.g., their use of DynamoDB Streams for audit logging is an approach we would add to our observability layer; their circuit breaker configuration with shorter probe intervals reduces recovery latency compared to our 15-second open window.)
-
-\medskip
-\begin{tcolorbox}[
-  colback=surface,
-  colframe=border,
-  boxrule=0.6pt,
-  arc=2pt,
-  left=8pt, right=8pt, top=6pt, bottom=6pt,
-]
-  \textbf{Note:} Specific project links and completed comparison text will be added to this section after the Piazza posting deadline, when peer projects are available for review.
-\end{tcolorbox}
 
 
 % ============================================================
