@@ -95,11 +95,11 @@ The campus printer is always jammed, always queued, and always somehow printing 
 
 ## The three projects most like ours
 
-| # | Project | Post | Closest to us on | Their team |
-|---|---------|------|------------------|------------|
-| 1 | Concert Ticket Booking Platform | [@1407](https://piazza.com/class/mk3hftotl6e229/post/1407) | Infrastructure stack and one-winner contention | Megan Heinhold, Bhargav Pamidighantam, Abhishek Raghuraman |
-| 2 | Distributed KV Store with Raft and Chaos Engineering | [@1408](https://piazza.com/class/mk3hftotl6e229/post/1408) | Fault-tolerance experiment template | Qian Li, Zhengyi Xu, Wenyu Yang, Siwen Wu |
-| 3 | GatherYourDeals: Data Service | [@1402](https://piazza.com/class/mk3hftotl6e229/post/1402) | Locust methodology and saturation framing | GatherYourDeals data team |
+| # | Project | Post | Closest to us on |
+|---|---------|------|------------------|
+| 1 | Concert Ticket Booking Platform | [@1407](https://piazza.com/class/mk3hftotl6e229/post/1407) | Infrastructure stack and one-winner contention |
+| 2 | Distributed KV Store with Raft and Chaos Engineering | [@1408](https://piazza.com/class/mk3hftotl6e229/post/1408) | Fault-tolerance experiment template |
+| 3 | GatherYourDeals: Data Service | [@1402](https://piazza.com/class/mk3hftotl6e229/post/1402) | Locust methodology and saturation framing |
 
 We picked these by reading every Final Project post currently in the folder and picking the three with the deepest overlap on either architecture (us and @1407 share an AWS stack), failure-mode design (us and @1408 both built "kill, recover, verify safety" experiments), or experimental rigor (us and @1402 both leaned on Locust and ran into the same "low latency hides errors" trap).
 
@@ -107,7 +107,7 @@ We picked these by reading every Final Project post currently in the folder and 
 
 ### 1. Concert Ticket Booking Platform ([@1407](https://piazza.com/class/mk3hftotl6e229/post/1407))
 
-> Megan, Bhargav, and Abhishek built a ticket-booking platform on the same AWS stack we used (ECS Fargate, Locust, a relational store) and tackled the same fundamental problem: serialize concurrent requests against a shared finite resource. Theirs is a seat in a concert; ours is a slot at a printer.
+> A ticket-booking platform on the same AWS stack we used (ECS Fargate, Locust, a relational store) tackling the same fundamental problem: serialize concurrent requests against a shared finite resource. Theirs is a seat in a concert; ours is a slot at a printer.
 
 | | Their project | Ours |
 |---|---------------|------|
@@ -127,7 +127,7 @@ We picked these by reading every Final Project post currently in the folder and 
 
 ### 2. Distributed Key-Value Store with Raft and Chaos Engineering ([@1408](https://piazza.com/class/mk3hftotl6e229/post/1408))
 
-> Qian, Zhengyi, Wenyu, and Siwen built a 5-node Raft KV store with `hashicorp/raft` and BoltDB, then ran three rigorous chaos experiments: leader crash recovery, network partitions (minority isolation, leader isolation, symmetric split), and read scaling under different consistency modes.
+> A 5-node Raft KV store built with `hashicorp/raft` and BoltDB, with three rigorous chaos experiments: leader crash recovery, network partitions (minority isolation, leader isolation, symmetric split), and read scaling under different consistency modes.
 
 | | Their project | Ours |
 |---|---------------|------|
@@ -167,7 +167,7 @@ We picked these by reading every Final Project post currently in the folder and 
 
 ## Closing
 
-If anyone above (Megan, Bhargav, Abhishek on tickets, the Raft KV team, the GatherYourDeals folks) wants to compare notes, we are especially interested in:
+If anyone from those three teams (or anyone else with overlapping work) wants to compare notes, we are especially interested in:
 
 1. Anyone who pitted DynamoDB conditional writes against an explicit Redis SETNX lock for the same workload. We would love to see the latency and cost numbers side by side.
 2. How teams designed their second-order failure experiments: simultaneous kills, partial network failures, slow consumers. Our single-task-kill scenario is the obvious next thing to extend.
