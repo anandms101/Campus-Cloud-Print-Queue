@@ -2,23 +2,25 @@
 
 **Team:** Anand Mohan Singh, Vaibhav Thalanki, Pranav Viswanathan
 
-**TL;DR:** Release-at-device cloud printing on AWS (Go Gin API + Python workers, ECS Fargate, DynamoDB, S3, per-printer SQS). Four experiments: Locust load (1,484 req, 0.0% errors, p99 370 ms), DynamoDB contention (50 concurrent releases, 1 winner, 0 errors), printer saturation, fault injection (kill task, 0 duplicates after recovery). The three closest projects in the class are [@1407](https://piazza.com/class/mk3hftotl6e229/post/1407) (Concert Tickets, same AWS stack, same one-winner contention story), [@1408](https://piazza.com/class/mk3hftotl6e229/post/1408) (Raft KV with Chaos Engineering, same fault-tolerance experiment template), and [@1402](https://piazza.com/class/mk3hftotl6e229/post/1402) (GatherYourDeals, same Locust methodology and saturation framing).
+**TL;DR:** Release-at-device cloud printing on AWS (Go Gin API + Python workers, ECS Fargate, DynamoDB, S3, per-printer SQS). Four experiments: Locust load (1,484 req, 0.0% errors, p99 370 ms), DynamoDB contention (50 concurrent releases, 1 winner, 0 errors), printer saturation, fault injection (kill task, 0 duplicates after recovery). The three closest projects in the class are [@ 1407](https://piazza.com/class/mk3hftotl6e229/post/1407) (Concert Tickets, same AWS stack, same one-winner contention story), [@ 1408](https://piazza.com/class/mk3hftotl6e229/post/1408) (Raft KV with Chaos Engineering, same fault-tolerance experiment template), and [@ 1402](https://piazza.com/class/mk3hftotl6e229/post/1402) (GatherYourDeals, same Locust methodology and saturation framing).
 
 ---
 
 ## Demo video
 
-[![Watch the Campus Cloud Print Queue demo on YouTube](https://img.youtube.com/vi/W4ehZsmXToc/maxresdefault.jpg)](https://youtu.be/W4ehZsmXToc)
+[![Watch the Campus Cloud Print Queue demo on YouTube](https://img.youtube.com/vi/KXTG66NV9Wc/maxresdefault.jpg)](uploaded
+https://youtu.be/W4ehZsmXToc)
 
-*Click the thumbnail to watch on YouTube: https://youtu.be/W4ehZsmXToc*
+*Click the thumbnail to watch on YouTube: uploaded
+https://youtu.be/W4ehZsmXToc*
 
 ## Repo, report, and architecture
 
 | Resource | Link |
 |----------|------|
-| GitHub repository | https://github.com/anandms101/Campus-Cloud-Print-Queue |
-| Experiments report (PDF) | [`docs/CampusPrint_Experiments_Report.pdf`](https://github.com/anandms101/Campus-Cloud-Print-Queue/blob/main/docs/CampusPrint_Experiments_Report.pdf) |
+| GitHub repository | [`Campus-Cloud-Print-Queue`](https://github.com/anandms101/Campus-Cloud-Print-Queue)  |
 | Final report (PDF) | [`docs/CampusPrint_Final_Report.pdf`](https://github.com/anandms101/Campus-Cloud-Print-Queue/blob/main/docs/CampusPrint_Final_Report.pdf) |
+| Experiment report (PDF)| [`docs/CampusPrint_Experiments_Report.pdf`](https://github.com/anandms101/Campus-Cloud-Print-Queue/blob/main/docs/CampusPrint_Experiments_Report.pdf) |
 | Architecture doc | [`docs/ARCHITECTURE.md`](https://github.com/anandms101/Campus-Cloud-Print-Queue/blob/main/docs/ARCHITECTURE.md) |
 
 ---
@@ -98,15 +100,15 @@ The campus printer is always jammed, always queued, and always somehow printing 
 
 | # | Project | Post | Closest to us on |
 |---|---------|------|------------------|
-| 1 | Concert Ticket Booking Platform | [@1407](https://piazza.com/class/mk3hftotl6e229/post/1407) | Infrastructure stack and one-winner contention |
-| 2 | Distributed KV Store with Raft and Chaos Engineering | [@1408](https://piazza.com/class/mk3hftotl6e229/post/1408) | Fault-tolerance experiment template |
-| 3 | GatherYourDeals: Data Service | [@1402](https://piazza.com/class/mk3hftotl6e229/post/1402) | Locust methodology and saturation framing |
+| 1 | Concert Ticket Booking Platform | [@ 1407](https://piazza.com/class/mk3hftotl6e229/post/1407) | Infrastructure stack and one-winner contention |
+| 2 | Distributed KV Store with Raft and Chaos Engineering | [@ 1408](https://piazza.com/class/mk3hftotl6e229/post/1408) | Fault-tolerance experiment template |
+| 3 | GatherYourDeals: Data Service | [@ 1402](https://piazza.com/class/mk3hftotl6e229/post/1402) | Locust methodology and saturation framing |
 
 We picked these by reading every Final Project post currently in the folder and picking the three with the deepest overlap on either architecture (us and @1407 share an AWS stack), failure-mode design (us and @1408 both built "kill, recover, verify safety" experiments), or experimental rigor (us and @1402 both leaned on Locust and ran into the same "low latency hides errors" trap).
 
 ---
 
-### 1. Concert Ticket Booking Platform ([@1407](https://piazza.com/class/mk3hftotl6e229/post/1407))
+### 1. [Concert Ticket Booking Platform](https://piazza.com/class/mk3hftotl6e229/post/1407)
 
 > A ticket-booking platform on the same AWS stack we used (ECS Fargate, Locust, a relational store) tackling the same fundamental problem: serialize concurrent requests against a shared finite resource. Theirs is a seat in a concert; ours is a slot at a printer.
 
@@ -126,7 +128,7 @@ We picked these by reading every Final Project post currently in the folder and 
 
 ---
 
-### 2. Distributed Key-Value Store with Raft and Chaos Engineering ([@1408](https://piazza.com/class/mk3hftotl6e229/post/1408))
+### 2.  [Distributed Key-Value Store with Raft and Chaos Engineering](https://piazza.com/class/mk3hftotl6e229/post/1408)
 
 > A 5-node Raft KV store built with `hashicorp/raft` and BoltDB, with three rigorous chaos experiments: leader crash recovery, network partitions (minority isolation, leader isolation, symmetric split), and read scaling under different consistency modes.
 
@@ -146,7 +148,7 @@ We picked these by reading every Final Project post currently in the folder and 
 
 ---
 
-### 3. GatherYourDeals: Data Service Final Report ([@1402](https://piazza.com/class/mk3hftotl6e229/post/1402))
+### 3. [GatherYourDeals: Data Service](https://piazza.com/class/mk3hftotl6e229/post/1402)
 
 > The data-service half of GatherYourDeals (a Postgres + Redis auth/token service on Railway) ran load tests in Locust across 8 different deployment configurations and reported login/refresh latency at p50 and p95 for each.
 
@@ -165,13 +167,3 @@ We picked these by reading every Final Project post currently in the folder and 
 **What we learned.** Their Run 6 vs Run 7 callout, where a Railway service outage produced unreproducible latency tails, was a useful reminder that we should report results from at least two separate runs and flag any outlier we cannot reproduce. Our 603 ms DELETE outlier in Experiment 1 is a candidate for exactly that kind of "Heisenberg failure" footnote.
 
 ---
-
-## Closing
-
-If anyone from those three teams (or anyone else with overlapping work) wants to compare notes, we are especially interested in:
-
-1. Anyone who pitted DynamoDB conditional writes against an explicit Redis SETNX lock for the same workload. We would love to see the latency and cost numbers side by side.
-2. How teams designed their second-order failure experiments: simultaneous kills, partial network failures, slow consumers. Our single-task-kill scenario is the obvious next thing to extend.
-3. Anyone whose load-test runs surfaced reproducibility issues like the GatherYourDeals Railway outage, and how you reported them.
-
-Comments and roasts welcome.
