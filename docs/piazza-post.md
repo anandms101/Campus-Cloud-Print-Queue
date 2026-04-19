@@ -8,9 +8,9 @@
 
 ## Demo video
 
-[![Watch the Campus Cloud Print Queue demo on YouTube](https://img.youtube.com/vi/KXTG66NV9Wc/maxresdefault.jpg)](https://youtu.be/KXTG66NV9Wc)
+[![Watch the Campus Cloud Print Queue demo on YouTube](https://img.youtube.com/vi/W4ehZsmXToc/maxresdefault.jpg)](https://youtu.be/W4ehZsmXToc)
 
-*Click the thumbnail to watch on YouTube: https://youtu.be/KXTG66NV9Wc*
+*Click the thumbnail to watch on YouTube: https://youtu.be/W4ehZsmXToc*
 
 ## Repo, report, and architecture
 
