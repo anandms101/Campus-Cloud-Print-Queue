@@ -2,7 +2,7 @@
 
 **Team:** Anand Mohan Singh, Vaibhav Thalanki, Pranav Viswanathan
 
-**TL;DR:** Release-at-device cloud printing on AWS (Go Gin API + Python workers, ECS Fargate, DynamoDB, S3, per-printer SQS). Four experiments: Locust load (1,484 req, 0.0% errors, p99 370 ms), DynamoDB contention (50 concurrent releases, 1 winner, 0 errors), printer saturation, fault injection (kill task, 0 duplicates after recovery). The three closest projects in the class are @1407 (Concert Tickets, same AWS stack, same one-winner contention story), @1408 (Raft KV with Chaos Engineering, same fault-tolerance experiment template), and @1402 (GatherYourDeals, same Locust methodology and saturation framing).
+**TL;DR:** Release-at-device cloud printing on AWS (Go Gin API + Python workers, ECS Fargate, DynamoDB, S3, per-printer SQS). Four experiments: Locust load (1,484 req, 0.0% errors, p99 370 ms), DynamoDB contention (50 concurrent releases, 1 winner, 0 errors), printer saturation, fault injection (kill task, 0 duplicates after recovery). The three closest projects in the class are [@1407](https://piazza.com/class/mk3hftotl6e229/post/1407) (Concert Tickets, same AWS stack, same one-winner contention story), [@1408](https://piazza.com/class/mk3hftotl6e229/post/1408) (Raft KV with Chaos Engineering, same fault-tolerance experiment template), and [@1402](https://piazza.com/class/mk3hftotl6e229/post/1402) (GatherYourDeals, same Locust methodology and saturation framing).
 
 ---
 
